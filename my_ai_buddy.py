@@ -162,82 +162,6 @@ def parse_usd_range_to_inr(val, rate, mode, unk_zero):
   return round(usd_amt * rate, 2)
 
 
-def build_default_dataset():
-  return pd.DataFrame({
-      "Region": [
-          "Jalgaon",
-          "Pune",
-          "Mumbai",
-          "Nashik",
-          "Jalgaon",
-          "Pune",
-          "Mumbai",
-          "Nashik",
-          "Pune",
-          "Mumbai",
-          "Jalgaon",
-          "Nashik",
-      ],
-      "Category": [
-          "Masale",
-          "Audio",
-          "Analytics",
-          "Masale",
-          "Audio",
-          "Analytics",
-          "Masale",
-          "Audio",
-          "Masale",
-          "Audio",
-          "Analytics",
-          "Analytics",
-      ],
-      "Month": [
-          "Jan",
-          "Jan",
-          "Jan",
-          "Feb",
-          "Feb",
-          "Feb",
-          "Mar",
-          "Mar",
-          "Mar",
-          "Apr",
-          "Apr",
-          "Apr",
-      ],
-      "Revenue": [
-          42000,
-          68000,
-          95000,
-          38000,
-          74000,
-          102000,
-          51000,
-          81000,
-          49000,
-          88000,
-          91000,
-          64000,
-      ],
-      "Cost": [
-          26000,
-          41000,
-          58000,
-          24000,
-          45000,
-          61000,
-          31000,
-          49000,
-          29500,
-          53000,
-          55000,
-          39000,
-      ],
-      "Units": [210, 12, 18, 190, 14, 20, 250, 15, 225, 17, 19, 16],
-  })
-
-
 def build_sql_analysis_library(cat_col, num_col):
   return {
       "1. Preview Top 20 Rows": "SELECT * FROM dataset LIMIT 20;",
@@ -1112,13 +1036,17 @@ if uploaded_file is not None:
     st.session_state.ds_ml_report = None
     st.session_state.ds_trained_bundle = None
 else:
-  if st.session_state.uni_loaded_file != "__default_sample__":
-    st.session_state.uni_loaded_file = "__default_sample__"
-    sample = build_default_dataset()
-    st.session_state.uni_raw_df = sample.copy()
-    st.session_state.uni_df = sample.copy()
+  st.session_state.uni_loaded_file = None
+  st.session_state.uni_raw_df = None
+  st.session_state.uni_df = None
+  st.info("📂 कृपया शुरू करने के लिए अपनी CSV या Excel फ़ाइल अपलोड करें। अभी कोई सैंपल डेटा लोड नहीं है।")
+  st.stop()
 
 active_df = st.session_state.uni_df
+if active_df is None or active_df.empty:
+  st.warning("⚠️ कृपया डेटा वाली CSV या Excel फ़ाइल अपलोड करें।")
+  st.stop()
+
 with top_u2:
   st.metric("सक्रिय डेटा आकार", f"{active_df.shape[0]} × {active_df.shape[1]}")
   st.download_button(

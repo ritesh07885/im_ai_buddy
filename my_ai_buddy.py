@@ -85,6 +85,21 @@ st.set_page_config(
 )
 
 # ==============================================================================
+# BILINGUAL HELPER (HINDI <-> ENGLISH ONE-TAP SWITCH)
+# ==============================================================================
+if "ui_lang" not in st.session_state:
+    st.session_state.ui_lang = "Hindi"
+
+
+def T(hi_text, en_text):
+    return en_text if st.session_state.get("ui_lang", "Hindi") == "English" else hi_text
+
+
+def is_en():
+    return st.session_state.get("ui_lang", "Hindi") == "English"
+
+
+# ==============================================================================
 # DATA SCIENCE FUNCTION & ALGORITHM CATALOG (LIST / BOX REFERENCE)
 # ==============================================================================
 DS_FUNCTION_CATALOG = {
@@ -329,21 +344,29 @@ def build_sql_analysis_library(cat_col, num_col):
     }
 
 
+def _compact_prompt_for_token_limit(prompt_text, max_chars=5500):
+    if len(prompt_text) <= max_chars:
+        return prompt_text
+    lines = prompt_text.splitlines()
+    kept = []
+    total = 0
+    for ln in lines:
+        clean_ln = ln[:320] + ("..." if len(ln) > 320 else "")
+        if total + len(clean_ln) + 1 > max_chars:
+            kept.append("... [Prompt shortened to fit Groq/Provider token limit] ...")
+            break
+        kept.append(clean_ln)
+        total += len(clean_ln) + 1
+    return "\n".join(kept)
+
+
 def call_openai_compatible_chat(
     api_key_val, base_url, model_name, prompt_text, provider_label="OpenAI-Compatible", extra_headers=None
 ):
     if not api_key_val:
-        return None, f"{provider_label} API Key खाली है।"
+        return None, T(f"{provider_label} API Key खाली है।", f"{provider_label} API Key is empty.")
 
     url = f"{base_url.rstrip('/')}/chat/completions"
-    payload = {
-        "model": model_name.strip(),
-        "messages": [
-            {"role": "system", "content": "You are I'm AI Buddy, a helpful data science and AI assistant."},
-            {"role": "user", "content": prompt_text},
-        ],
-        "temperature": 0.3,
-    }
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -356,27 +379,47 @@ def call_openai_compatible_chat(
     if extra_headers:
         headers.update(extra_headers)
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            choices = data.get("choices") or []
-            if choices:
-                msg = choices[0].get("message") or {}
-                txt = (msg.get("content") or "").strip()
-                if txt:
-                    return f"{txt}\n\n*(Provider: {provider_label} — `{model_name}`)*", None
-        return None, f"{provider_label} से खाली जवाब आया।"
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        return None, f"{provider_label} HTTP {e.code}: {body[:200]}"
-    except Exception as exc:
-        return None, f"{provider_label} एरर: {exc}"
+    prompts_to_try = [prompt_text]
+    if len(prompt_text) > 5500:
+        prompts_to_try.append(_compact_prompt_for_token_limit(prompt_text, max_chars=5500))
+    prompts_to_try.append(_compact_prompt_for_token_limit(prompt_text, max_chars=2400))
+
+    last_err = None
+    for idx_p, p_try in enumerate(prompts_to_try):
+        payload = {
+            "model": model_name.strip(),
+            "messages": [
+                {"role": "system", "content": "You are I'm AI Buddy, a concise data science and AI assistant."},
+                {"role": "user", "content": p_try},
+            ],
+            "temperature": 0.3,
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                choices = data.get("choices") or []
+                if choices:
+                    msg = choices[0].get("message") or {}
+                    txt = (msg.get("content") or "").strip()
+                    if txt:
+                        suffix = " *(Auto-compacted for 413 token limit)*" if idx_p > 0 else ""
+                        return f"{txt}\n\n*(Provider: {provider_label} — `{model_name}`{suffix})*", None
+            return None, T(f"{provider_label} से खाली जवाब आया।", f"Empty response received from {provider_label}.")
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            last_err = f"{provider_label} HTTP {e.code}: {body[:240]}"
+            if e.code == 413 and idx_p < len(prompts_to_try) - 1:
+                continue
+            return None, last_err
+        except Exception as exc:
+            return None, T(f"{provider_label} एरर: {exc}", f"{provider_label} Error: {exc}")
+    return None, last_err or T(f"{provider_label} अनुरोध विफल रहा।", f"{provider_label} request failed.")
 
 
 def call_ollama_fallback(prompt_text, ollama_model="qwen2.5:3b", ollama_url="http://localhost:11434"):
@@ -397,11 +440,11 @@ def call_ollama_fallback(prompt_text, ollama_model="qwen2.5:3b", ollama_url="htt
             txt = (data.get("response") or "").strip()
             if txt:
                 return f"{txt}\n\n*(Provider: Local Ollama — `{ollama_model}`)*", None
-        return None, "Ollama से खाली जवाब आया।"
+        return None, T("Ollama से खाली जवाब आया।", "Empty response received from Ollama.")
     except urllib.error.URLError as e:
-        return None, f"Ollama कनेक्ट नहीं हो सका ({e.reason})"
+        return None, T(f"Ollama कनेक्ट नहीं हो सका ({e.reason})", f"Could not connect to Ollama ({e.reason})")
     except Exception as e:
-        return None, f"Ollama एरर: {e}"
+        return None, T(f"Ollama एरर: {e}", f"Ollama Error: {e}")
 
 
 def call_ai_provider(ai_cfg, prompt_text):
@@ -503,18 +546,26 @@ def call_ai_provider(ai_cfg, prompt_text):
             return ol_res, None
         last_err = f"Gemini Err: {last_err} | {ol_err}"
 
-    return None, str(last_err or "AI सेवा अस्थायी रूप से उपलब्ध नहीं है।")
+    return None, str(last_err or T("AI सेवा अस्थायी रूप से उपलब्ध नहीं है।", "AI service is temporarily unavailable."))
 
 
 def build_local_stats_summary(df_in):
     num_c = df_in.select_dtypes(include="number").columns.tolist()
     cat_c = df_in.select_dtypes(exclude="number").columns.tolist()
-    lines = [
-        f"**लोकल स्टैटिस्टिकल समरी:** कुल पंक्तियाँ = `{len(df_in)}`, कुल कॉलम = `{len(df_in.columns)}`",
-        f"- Numeric कॉलम्स ({len(num_c)}): {', '.join(num_c) if num_c else 'कोई नहीं'}",
-        f"- Category/Text कॉलम्स ({len(cat_c)}): {', '.join(cat_c) if cat_c else 'कोई नहीं'}",
-        f"- खाली सेल (Nulls): `{int(df_in.isna().sum().sum())}` | डुप्लीकेट पंक्तियाँ: `{int(df_in.duplicated().sum())}`",
-    ]
+    if is_en():
+        lines = [
+            f"**Local Statistical Summary:** Total Rows = `{len(df_in)}`, Total Columns = `{len(df_in.columns)}`",
+            f"- Numeric Columns ({len(num_c)}): {', '.join(num_c) if num_c else 'None'}",
+            f"- Category/Text Columns ({len(cat_c)}): {', '.join(cat_c) if cat_c else 'None'}",
+            f"- Missing Cells (Nulls): `{int(df_in.isna().sum().sum())}` | Duplicate Rows: `{int(df_in.duplicated().sum())}`",
+        ]
+    else:
+        lines = [
+            f"**लोकल स्टैटिस्टिकल समरी:** कुल पंक्तियाँ = `{len(df_in)}`, कुल कॉलम = `{len(df_in.columns)}`",
+            f"- Numeric कॉलम्स ({len(num_c)}): {', '.join(num_c) if num_c else 'कोई नहीं'}",
+            f"- Category/Text कॉलम्स ({len(cat_c)}): {', '.join(cat_c) if cat_c else 'कोई नहीं'}",
+            f"- खाली सेल (Nulls): `{int(df_in.isna().sum().sum())}` | डुप्लीकेट पंक्तियाँ: `{int(df_in.duplicated().sum())}`",
+        ]
     for c in num_c[:6]:
         s = pd.to_numeric(get_1d_series(df_in, c), errors="coerce").dropna()
         if not s.empty:
@@ -661,7 +712,10 @@ def train_regression_suite(df_sub, target_col, feature_cols, selected_models, te
     work[target_col] = pd.to_numeric(work[target_col], errors="coerce")
     work = work.dropna(subset=[target_col])
     if len(work) < 6:
-        return None, "Regression के लिए कम से कम 6 वैध पंक्तियाँ चाहिए।"
+        return None, T(
+            "Regression के लिए कम से कम 6 वैध पंक्तियाँ चाहिए।",
+            "At least 6 valid rows are required for Regression.",
+        )
 
     X = work[feature_cols]
     y = work[target_col].astype(np.float32)
@@ -734,7 +788,10 @@ def train_classification_suite(df_sub, target_col, feature_cols, selected_models
     work = work[work[target_col].isin(valid_classes)]
 
     if len(work) < 8 or work[target_col].nunique() < 2:
-        return None, "Classification के लिए कम से कम 2 Classes (हर में ≥2 rows) और ≥8 पंक्तियाँ चाहिए।"
+        return None, T(
+            "Classification के लिए कम से कम 2 Classes (हर में ≥2 rows) और ≥8 पंक्तियाँ चाहिए।",
+            "Classification requires at least 2 classes (≥2 rows each) and ≥8 total rows.",
+        )
 
     X = work[feature_cols]
     y = work[target_col]
@@ -830,7 +887,7 @@ def render_dist_fig(series_in, col_name):
         ax_b.set_xlabel(str(col_name))
         ax_b.set_yticks([])
     else:
-        ax_h.text(0.5, 0.5, "पर्याप्त Numeric डेटा नहीं है।", ha="center", va="center")
+        ax_h.text(0.5, 0.5, T("पर्याप्त Numeric डेटा नहीं है।", "Not enough numeric data."), ha="center", va="center")
         ax_b.axis("off")
     plt.tight_layout()
     return fig
@@ -849,7 +906,7 @@ def render_cat_bar_fig(series_in, col_name, top_n=8):
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
     else:
-        ax.text(0.5, 0.5, "Category डेटा नहीं मिला।", ha="center", va="center")
+        ax.text(0.5, 0.5, T("Category डेटा नहीं मिला।", "No category data found."), ha="center", va="center")
     plt.tight_layout()
     return fig
 
@@ -865,7 +922,7 @@ def build_local_soft_bg(width=900, height=520):
 
 def generate_ai_bg_image(gem_key_val, prompt_text):
     if not HAS_GENAI or not gem_key_val:
-        return build_local_soft_bg(), "Local Fallback (Gemini API Key नहीं है)"
+        return build_local_soft_bg(), T("Local Fallback (Gemini API Key नहीं है)", "Local Fallback (No Gemini API Key)")
     try:
         client = genai.Client(api_key=gem_key_val)
         resp = client.models.generate_content(
@@ -1030,7 +1087,14 @@ def render_bi_chart_with_bg(
                 rendered_ok = True
 
     if not rendered_ok:
-        ax.text(0.5, 0.5, "इस कॉलम संयोजन के लिए उपयुक्त डेटा उपलब्ध नहीं है।", ha="center", va="center", fontsize=10)
+        ax.text(
+            0.5,
+            0.5,
+            T("इस कॉलम संयोजन के लिए उपयुक्त डेटा उपलब्ध नहीं है।", "No suitable data for this column combination."),
+            ha="center",
+            va="center",
+            fontsize=10,
+        )
         ax.set_xticks([])
         ax.set_yticks([])
     elif chart_type != "Donut":
@@ -1062,7 +1126,7 @@ def render_bi_chart_with_bg(
 def run_sql_engine(engine_name, df_main, query_str):
     q = query_str.strip()
     if not q:
-        return None, "कृपया SQL क्वेरी लिखें।"
+        return None, T("कृपया SQL क्वेरी लिखें।", "Please enter an SQL query.")
     if engine_name.startswith("DuckDB") and HAS_DUCKDB:
         con = duckdb.connect(database=":memory:")
         try:
@@ -1090,12 +1154,25 @@ def run_sql_engine(engine_name, df_main, query_str):
 
 
 # ==============================================================================
-# SIDEBAR (MULTI-PLATFORM AI SETTINGS)
+# SIDEBAR (ONE-TAP LANGUAGE SWITCH + MULTI-PLATFORM AI SETTINGS)
 # ==============================================================================
-st.sidebar.header("🤖 I'm AI Buddy — सेटिंग्स")
+st.sidebar.header(T("🌐 भाषा / Language (One-Tap)", "🌐 Language / भाषा (One-Tap)"))
+lang_choice = st.sidebar.radio(
+    T("इंटरफ़ेस व AI आउटपुट की भाषा:", "Interface & AI Output Language:"),
+    ["Hindi", "English"],
+    index=0 if st.session_state.ui_lang == "Hindi" else 1,
+    horizontal=True,
+    key="sidebar_lang_radio",
+)
+if lang_choice != st.session_state.ui_lang:
+    st.session_state.ui_lang = lang_choice
+    st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.header(T("🤖 I'm AI Buddy — सेटिंग्स", "🤖 I'm AI Buddy — Settings"))
 
 selected_provider = st.sidebar.selectbox(
-    "AI Platform चुनें:",
+    T("AI Platform चुनें:", "Select AI Platform:"),
     ["Google Gemini", "ChatGPT (OpenAI)", "Groq", "OpenRouter", "Local Ollama"],
     key="ai_provider_sel",
 )
@@ -1112,40 +1189,52 @@ ollama_mdl_name = "qwen2.5:3b"
 ollama_url = "http://localhost:11434"
 
 if selected_provider == "Google Gemini":
-    gemini_key = st.sidebar.text_input("Google Gemini API Key डालें:", type="password", key="gem_api_key_in").strip()
+    gemini_key = st.sidebar.text_input(
+        T("Google Gemini API Key डालें:", "Enter Google Gemini API Key:"), type="password", key="gem_api_key_in"
+    ).strip()
     gemini_model = st.sidebar.selectbox(
-        "Gemini Model चुनें:",
+        T("Gemini Model चुनें:", "Select Gemini Model:"),
         ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.8-flash"],
         key="gem_model_sel",
     )
 elif selected_provider == "ChatGPT (OpenAI)":
-    openai_key = st.sidebar.text_input("OpenAI (ChatGPT) API Key डालें:", type="password", key="oai_api_key_in").strip()
+    openai_key = st.sidebar.text_input(
+        T("OpenAI (ChatGPT) API Key डालें:", "Enter OpenAI (ChatGPT) API Key:"), type="password", key="oai_api_key_in"
+    ).strip()
     openai_model = st.sidebar.selectbox(
-        "OpenAI Model चुनें:",
+        T("OpenAI Model चुनें:", "Select OpenAI Model:"),
         ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"],
         key="oai_model_sel",
     )
 elif selected_provider == "Groq":
-    groq_key = st.sidebar.text_input("Groq API Key डालें:", type="password", key="groq_api_key_in").strip()
+    groq_key = st.sidebar.text_input(
+        T("Groq API Key डालें:", "Enter Groq API Key:"), type="password", key="groq_api_key_in"
+    ).strip()
     groq_preset = st.sidebar.selectbox(
-        "Groq Model चुनें:",
+        T("Groq Model चुनें:", "Select Groq Model:"),
         ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "Custom Model Name"],
         key="groq_model_sel",
     )
     if groq_preset == "Custom Model Name":
-        groq_model = st.sidebar.text_input("Custom Groq Model ID लिखें:", value="openai/gpt-oss-120b", key="groq_custom_mdl_in").strip()
+        groq_model = st.sidebar.text_input(
+            T("Custom Groq Model ID लिखें:", "Enter Custom Groq Model ID:"),
+            value="openai/gpt-oss-120b",
+            key="groq_custom_mdl_in",
+        ).strip()
     else:
         groq_model = groq_preset
 elif selected_provider == "OpenRouter":
-    openrouter_key = st.sidebar.text_input("OpenRouter API Key डालें:", type="password", key="or_api_key_in").strip()
+    openrouter_key = st.sidebar.text_input(
+        T("OpenRouter API Key डालें:", "Enter OpenRouter API Key:"), type="password", key="or_api_key_in"
+    ).strip()
     openrouter_model = st.sidebar.text_input("OpenRouter Model Name:", value="openrouter/free", key="or_model_in").strip()
 else:
     ollama_mdl_name = st.sidebar.text_input("Ollama Model Name:", value="qwen2.5:3b", key="ol_mdl_in").strip()
     ollama_url = st.sidebar.text_input("Ollama URL:", value="http://localhost:11434", key="ol_url_in").strip()
 
 st.sidebar.markdown("---")
-st.sidebar.caption("अन्य उपलब्ध Keys (Optional Backup):")
-with st.sidebar.expander("🔑 बाकी Platforms की Keys भी सेव करें", expanded=False):
+st.sidebar.caption(T("अन्य उपलब्ध Keys (Optional Backup):", "Other Available Keys (Optional Backup):"))
+with st.sidebar.expander(T("🔑 बाकी Platforms की Keys भी सेव करें", "🔑 Save Keys for Other Platforms"), expanded=False):
     if selected_provider != "Google Gemini":
         gemini_key = st.text_input("Gemini API Key:", value=gemini_key, type="password", key="bk_gem_key").strip()
     if selected_provider != "ChatGPT (OpenAI)":
@@ -1158,7 +1247,7 @@ with st.sidebar.expander("🔑 बाकी Platforms की Keys भी से�
         ollama_mdl_name = st.text_input("Ollama Model:", value=ollama_mdl_name, key="bk_ol_mdl").strip()
 
 use_ollama_fb = st.sidebar.checkbox(
-    "Local Ollama Fallback चालू रखें (केवल लोकल मशीन पर)",
+    T("Local Ollama Fallback चालू रखें (केवल लोकल मशीन पर)", "Enable Local Ollama Fallback (Local machine only)"),
     value=(selected_provider == "Local Ollama"),
     key="ol_fb_chk",
 )
@@ -1178,7 +1267,7 @@ ai_config = {
     "enable_ollama": use_ollama_fb,
 }
 
-if st.sidebar.button("🔄 मूल डेटा पर रीसेट करें"):
+if st.sidebar.button(T("🔄 मूल डेटा पर रीसेट करें", "🔄 Reset to Original Dataset")):
     if st.session_state.uni_raw_df is not None:
         st.session_state.uni_df = st.session_state.uni_raw_df.copy()
         st.session_state.ds_trained_bundle = None
@@ -1188,18 +1277,34 @@ if st.sidebar.button("🔄 मूल डेटा पर रीसेट कर�
         st.rerun()
 
 # ==============================================================================
-# TOP HEADER & SHARED FILE UPLOADER
+# TOP HEADER & ONE-TAP LANGUAGE BAR + SHARED FILE UPLOADER
 # ==============================================================================
-st.title("🤖 I'm AI Buddy")
-st.caption(
-    f"सक्रिय AI इंजन: **{selected_provider}** — Complete Data Science Studio, "
-    "Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI।"
-)
+hdr_col, lang_btn_col = st.columns([4.2, 1.1])
+with hdr_col:
+    st.title("🤖 I'm AI Buddy")
+    st.caption(
+        T(
+            f"सक्रिय AI इंजन: **{selected_provider}** — Complete Data Science Studio, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI।",
+            f"Active AI Engine: **{selected_provider}** — Complete Data Science Studio, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI.",
+        )
+    )
+with lang_btn_col:
+    st.write("")
+    if st.button(
+        "🌐 Switch to English" if not is_en() else "🌐 हिंदी में बदलें",
+        use_container_width=True,
+        key="top_one_tap_lang_btn",
+    ):
+        st.session_state.ui_lang = "English" if not is_en() else "Hindi"
+        st.rerun()
 
 top_u1, top_u2 = st.columns([3, 1])
 with top_u1:
     uploaded_file = st.file_uploader(
-        "अपनी CSV या Excel फ़ाइल अपलोड करें (सभी Tabs में यही डेटा अपने-आप उपलब्ध रहेगा)",
+        T(
+            "अपनी CSV या Excel फ़ाइल अपलोड करें (सभी Tabs में यही डेटा अपने-आप उपलब्ध रहेगा)",
+            "Upload your CSV or Excel file (Automatically shared across all tabs)",
+        ),
         type=["csv", "xlsx"],
         key="uni_file_uploader",
     )
@@ -1223,18 +1328,23 @@ else:
     st.session_state.uni_loaded_file = None
     st.session_state.uni_raw_df = None
     st.session_state.uni_df = None
-    st.info("📂 कृपया शुरू करने के लिए अपनी CSV या Excel फ़ाइल अपलोड करें। अभी कोई सैंपल डेटा लोड नहीं है।")
+    st.info(
+        T(
+            "📂 कृपया शुरू करने के लिए अपनी CSV या Excel फ़ाइल अपलोड करें। अभी कोई सैंपल डेटा लोड नहीं है।",
+            "📂 Please upload your CSV or Excel file to get started. No sample dataset is preloaded.",
+        )
+    )
     st.stop()
 
 active_df = st.session_state.uni_df
 if active_df is None or active_df.empty:
-    st.warning("⚠️ कृपया डेटा वाली CSV या Excel फ़ाइल अपलोड करें।")
+    st.warning(T("⚠️ कृपया डेटा वाली CSV या Excel फ़ाइल अपलोड करें।", "⚠️ Please upload a non-empty CSV or Excel file."))
     st.stop()
 
 with top_u2:
-    st.metric("सक्रिय डेटा आकार", f"{active_df.shape[0]} × {active_df.shape[1]}")
+    st.metric(T("सक्रिय डेटा आकार", "Active Dataset Shape"), f"{active_df.shape[0]} × {active_df.shape[1]}")
     st.download_button(
-        "📥 वर्तमान डेटा (.csv)",
+        T("📥 वर्तमान डेटा (.csv)", "📥 Current Dataset (.csv)"),
         data=active_df.to_csv(index=False).encode("utf-8"),
         file_name="im_ai_buddy_dataset.csv",
         mime="text/csv",
@@ -1255,26 +1365,29 @@ tab_da, tab_sql, tab_pbi, tab_ds = st.tabs([
 # TAB 1: ADVANCE DATA ANALYSIS & CLEANING + USD TO INR CONVERTER + REPORT EXPORT
 # ------------------------------------------------------------------------------
 with tab_da:
-    st.header("📊 Advance Data Analysis और डेटा क्लीनिंग")
+    st.header(T("📊 Advance Data Analysis और डेटा क्लीनिंग", "📊 Advanced Data Analysis & Data Cleaning"))
 
     da_nums = active_df.select_dtypes(include="number").columns.tolist()
     da_cats = active_df.select_dtypes(exclude="number").columns.tolist()
     da_all = active_df.columns.tolist()
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("कुल पंक्तियाँ", active_df.shape[0])
-    m2.metric("कुल कॉलम", active_df.shape[1])
-    m3.metric("खाली सेल (Nulls)", int(active_df.isna().sum().sum()))
-    m4.metric("डुप्लीकेट पंक्तियाँ", int(active_df.duplicated().sum()))
+    m1.metric(T("कुल पंक्तियाँ", "Total Rows"), active_df.shape[0])
+    m2.metric(T("कुल कॉलम", "Total Columns"), active_df.shape[1])
+    m3.metric(T("खाली सेल (Nulls)", "Missing Cells (Nulls)"), int(active_df.isna().sum().sum()))
+    m4.metric(T("डुप्लीकेट पंक्तियाँ", "Duplicate Rows"), int(active_df.duplicated().sum()))
 
-    with st.expander("🧹 डेटा क्लीनिंग और कॉलम एडिटिंग (सभी Tabs पर लागू होगा)", expanded=False):
+    with st.expander(
+        T("🧹 डेटा क्लीनिंग और कॉलम एडिटिंग (सभी Tabs पर लागू होगा)", "🧹 Data Cleaning & Column Editing (Applies across all tabs)"),
+        expanded=False,
+    ):
         c_clean1, c_clean2, c_clean3 = st.columns(3)
         with c_clean1:
-            if st.button("🗑️ डुप्लीकेट पंक्तियाँ हटाएं", key="da_drop_dups"):
+            if st.button(T("🗑️ डुप्लीकेट पंक्तियाँ हटाएं", "🗑️ Drop Duplicate Rows"), key="da_drop_dups"):
                 st.session_state.uni_df = active_df.drop_duplicates().reset_index(drop=True)
                 log_ds_action("Data Analysis: Dropped duplicate rows")
                 st.rerun()
-            if st.button("✂️ टेक्स्ट से अतिरिक्त स्पेस हटाएं (Trim)", key="da_trim"):
+            if st.button(T("✂️ टेक्स्ट से अतिरिक्त स्पेस हटाएं (Trim)", "✂️ Trim Whitespace from Text"), key="da_trim"):
                 tmp = active_df.copy()
                 for col in tmp.select_dtypes(include=["object", "string"]).columns:
                     tmp[col] = get_1d_series(tmp, col).apply(lambda x: x.strip() if isinstance(x, str) else x)
@@ -1283,14 +1396,16 @@ with tab_da:
                 st.rerun()
 
         with c_clean2:
+            null_opts_hi = ["Numeric में Median, Text में 'Unknown'", "Null वाली पंक्तियाँ हटाएं"]
+            null_opts_en = ["Fill Numeric with Median, Text with 'Unknown'", "Drop Rows with Nulls"]
             null_action = st.selectbox(
-                "Nulls संभालने का तरीका:",
-                ["Numeric में Median, Text में 'Unknown'", "Null वाली पंक्तियाँ हटाएं"],
+                T("Nulls संभालने का तरीका:", "Null Handling Method:"),
+                null_opts_en if is_en() else null_opts_hi,
                 key="da_null_sel",
             )
-            if st.button("🩹 Nulls ठीक करें", key="da_fix_nulls"):
+            if st.button(T("🩹 Nulls ठीक करें", "🩹 Fix Nulls"), key="da_fix_nulls"):
                 tmp = active_df.copy()
-                if null_action.startswith("Numeric"):
+                if null_action.startswith("Numeric") or null_action.startswith("Fill Numeric"):
                     for col in tmp.select_dtypes(include="number").columns:
                         s_n = pd.to_numeric(get_1d_series(tmp, col), errors="coerce")
                         tmp[col] = s_n.fillna(s_n.median())
@@ -1303,62 +1418,73 @@ with tab_da:
                 st.rerun()
 
         with c_clean3:
-            ren_col = st.selectbox("कॉलम का नाम बदलें:", active_df.columns.tolist(), key="da_ren_col")
-            ren_new = st.text_input("नया नाम:", value=str(ren_col), key="da_ren_txt")
-            if st.button("✏️ नाम अपडेट करें", key="da_ren_btn"):
+            ren_col = st.selectbox(T("कॉलम का नाम बदलें:", "Select Column to Rename:"), active_df.columns.tolist(), key="da_ren_col")
+            ren_new = st.text_input(T("नया नाम:", "New Column Name:"), value=str(ren_col), key="da_ren_txt")
+            if st.button(T("✏️ नाम अपडेट करें", "✏️ Update Name"), key="da_ren_btn"):
                 if ren_new.strip() and ren_new.strip() != ren_col:
                     st.session_state.uni_df = active_df.rename(columns={ren_col: ren_new.strip()})
                     log_ds_action(f"Data Analysis: Renamed '{ren_col}' -> '{ren_new.strip()}'")
                     st.rerun()
 
-    with st.expander("💱 USD Range कॉलम को Indian Rupee (INR) में बदलें", expanded=False):
+    with st.expander(T("💱 USD Range कॉलम को Indian Rupee (INR) में बदलें", "💱 Convert USD Range Column to Indian Rupee (INR)"), expanded=False):
         c_fx1, c_fx2, c_fx3, c_fx4 = st.columns([1.4, 1.1, 1.2, 1.3])
         with c_fx1:
-            fx_src_col = st.selectbox("USD कॉलम चुनें:", ["— चुनें —"] + da_all, key="da_fx_col")
+            none_lbl = "— Select —" if is_en() else "— चुनें —"
+            fx_src_col = st.selectbox(T("USD कॉलम चुनें:", "Select USD Column:"), [none_lbl] + da_all, key="da_fx_col")
         with c_fx2:
             usd_inr_rate = st.number_input("1 USD = ₹ (Rate):", min_value=1.0, max_value=500.0, value=92.79, step=0.1, key="da_fx_rate")
         with c_fx3:
-            range_pick = st.selectbox("रेंज का कौन-सा मान लें?", ["Midpoint (औसत)", "Lower Limit (न्यूनतम)", "Upper Limit (अधिकतम)"], key="da_fx_mode")
+            range_opts = (
+                ["Midpoint (Average)", "Lower Limit (Minimum)", "Upper Limit (Maximum)"]
+                if is_en()
+                else ["Midpoint (औसत)", "Lower Limit (न्यूनतम)", "Upper Limit (अधिकतम)"]
+            )
+            range_pick = st.selectbox(T("रेंज का कौन-सा मान लें?", "Range Value Extraction:"), range_opts, key="da_fx_mode")
         with c_fx4:
-            unknown_as_zero = st.checkbox("Unknown को 0 मानें", value=False, key="da_fx_unk")
+            unknown_as_zero = st.checkbox(T("Unknown को 0 मानें", "Treat Unknown as 0"), value=False, key="da_fx_unk")
 
-        if fx_src_col != "— चुनें —":
+        if fx_src_col != none_lbl:
             s_fx_raw = get_1d_series(active_df, fx_src_col)
             inr_vals = s_fx_raw.apply(lambda v: parse_usd_range_to_inr(v, usd_inr_rate, range_pick, unknown_as_zero))
             new_inr_col = f"{fx_src_col}_INR"
 
             prev_view = pd.DataFrame({fx_src_col: s_fx_raw.astype(str), new_inr_col: inr_vals}).drop_duplicates()
-            prev_view["INR (K / हज़ार)"] = (prev_view[new_inr_col] / 1e3).round(2)
-            prev_view["INR (Lakhs / लाख)"] = (prev_view[new_inr_col] / 1e5).round(2)
+            prev_view["INR (K)"] = (prev_view[new_inr_col] / 1e3).round(2)
+            prev_view["INR (Lakhs)"] = (prev_view[new_inr_col] / 1e5).round(2)
             st.dataframe(prev_view, use_container_width=True)
 
-            if st.button("➕ नया INR कॉलम डेटासेट में जोड़ें", key="da_fx_add_btn"):
+            if st.button(T("➕ नया INR कॉलम डेटासेट में जोड़ें", "➕ Add New INR Column to Dataset"), key="da_fx_add_btn"):
                 tmp_df = active_df.copy()
                 tmp_df[new_inr_col] = inr_vals.values
                 st.session_state.uni_df = tmp_df
                 log_ds_action(f"Data Analysis: Added INR column '{new_inr_col}'")
                 st.rerun()
 
-    st.subheader("🔎 इंटरएक्टिव फ़िल्टर और कॉलम एक्सप्लोरर")
+    st.subheader(T("🔎 इंटरएक्टिव फ़िल्टर और कॉलम एक्सप्लोरर", "🔎 Interactive Filter & Column Explorer"))
     f_col1, f_col2, f_col3 = st.columns([1.2, 1.4, 1.4])
+    all_lbl = "All" if is_en() else "सभी"
     with f_col1:
-        sel_cols_da = st.multiselect("देखने के लिए कॉलम चुनें:", da_all, default=da_all, key="da_show_cols")
+        sel_cols_da = st.multiselect(T("देखने के लिए कॉलम चुनें:", "Select Columns to Display:"), da_all, default=da_all, key="da_show_cols")
     with f_col2:
-        search_kw = st.text_input("कीवर्ड से पंक्तियाँ खोजें:", placeholder="किसी शब्द या नंबर से खोजें...", key="da_search_kw")
+        search_kw = st.text_input(
+            T("कीवर्ड से पंक्तियाँ खोजें:", "Search Rows by Keyword:"),
+            placeholder=T("किसी शब्द या नंबर से खोजें...", "Search by any word or number..."),
+            key="da_search_kw",
+        )
     with f_col3:
         if da_cats:
-            flt_cat = st.selectbox("Category फ़िल्टर कॉलम:", ["सभी"] + da_cats, key="da_flt_cat")
-            if flt_cat != "सभी":
+            flt_cat = st.selectbox(T("Category फ़िल्टर कॉलम:", "Category Filter Column:"), [all_lbl] + da_cats, key="da_flt_cat")
+            if flt_cat != all_lbl:
                 s_fcat = get_1d_series(active_df, flt_cat)
                 cat_vals = sorted(s_fcat.dropna().astype(str).unique().tolist())
-                flt_val = st.selectbox(f"{flt_cat} चुनें:", ["सभी"] + cat_vals, key="da_flt_val")
+                flt_val = st.selectbox(T(f"{flt_cat} चुनें:", f"Select {flt_cat}:"), [all_lbl] + cat_vals, key="da_flt_val")
             else:
-                flt_val = "सभी"
+                flt_val = all_lbl
         else:
-            flt_cat, flt_val = "सभी", "सभी"
+            flt_cat, flt_val = all_lbl, all_lbl
 
     da_view = active_df.copy()
-    if flt_cat != "सभी" and flt_val != "सभी":
+    if flt_cat != all_lbl and flt_val != all_lbl:
         da_view = da_view[get_1d_series(da_view, flt_cat).astype(str) == flt_val]
     if search_kw.strip():
         kw_l = search_kw.strip().lower()
@@ -1368,22 +1494,27 @@ with tab_da:
         da_view = da_view[mask]
 
     cols_to_show = sel_cols_da if sel_cols_da else da_all
-    st.caption(f"फ़िल्टर परिणाम: **{len(da_view)}** पंक्तियाँ × **{len(cols_to_show)}** कॉलम")
+    st.caption(
+        T(
+            f"फ़िल्टर परिणाम: **{len(da_view)}** पंक्तियाँ × **{len(cols_to_show)}** कॉलम",
+            f"Filtered Results: **{len(da_view)}** rows × **{len(cols_to_show)}** columns",
+        )
+    )
     st.dataframe(da_view[cols_to_show].head(100), use_container_width=True)
 
-    st.subheader("🩺 कॉलम स्वास्थ्य (Missing / Unique) और Numeric विवरण")
+    st.subheader(T("🩺 कॉलम स्वास्थ्य (Missing / Unique) और Numeric विवरण", "🩺 Column Health (Missing / Unique) & Numeric Summary"))
     st.dataframe(build_all_columns_profile(da_view), use_container_width=True)
     if da_nums:
         st.dataframe(da_view[da_nums].describe().round(2), use_container_width=True)
 
-    st.subheader("📐 GroupBy विश्लेषण और चार्ट")
+    st.subheader(T("📐 GroupBy विश्लेषण और चार्ट", "📐 GroupBy Analysis & Chart"))
     if da_all:
         gb_c1, gb_c2, gb_c3, gb_c4 = st.columns(4)
-        gb_by = gb_c1.selectbox("Group By कॉलम:", da_all, index=0, key="da_gb_by")
+        gb_by = gb_c1.selectbox(T("Group By कॉलम:", "Group By Column:"), da_all, index=0, key="da_gb_by")
         val_choices = da_nums if da_nums else da_all
-        gb_val = gb_c2.selectbox("Value कॉलम:", val_choices, index=0, key="da_gb_val")
+        gb_val = gb_c2.selectbox(T("Value कॉलम:", "Value Column:"), val_choices, index=0, key="da_gb_val")
         gb_fn = gb_c3.selectbox("Function:", ["sum", "mean", "count", "max", "min"], key="da_gb_fn")
-        gb_ch = gb_c4.selectbox("Chart प्रकार:", ["Bar Chart", "Line Chart"], key="da_gb_ch")
+        gb_ch = gb_c4.selectbox(T("Chart प्रकार:", "Chart Type:"), ["Bar Chart", "Line Chart"], key="da_gb_ch")
 
         s_grp_1d = get_1d_series(da_view, gb_by)
         s_val_1d = get_1d_series(da_view, gb_val)
@@ -1421,17 +1552,28 @@ with tab_da:
                 st.pyplot(fig_gb, use_container_width=True)
                 plt.close(fig_gb)
         else:
-            st.info(f"'{gb_val}' कॉलम में Numeric डेटा नहीं मिला; 'count' चुनकर या दूसरा कॉलम चुनकर देखें।")
+            st.info(
+                T(
+                    f"'{gb_val}' कॉलम में Numeric डेटा नहीं मिला; 'count' चुनकर या दूसरा कॉलम चुनकर देखें।",
+                    f"No numeric data found in '{gb_val}'; try selecting 'count' or another column.",
+                )
+            )
 
-    if st.button("🤖 AI से Data Analysis रिपोर्ट जनरेट करें", key="da_ai_btn"):
+    if st.button(T("🤖 AI से Data Analysis रिपोर्ट जनरेट करें", "🤖 Generate AI Data Analysis Report"), key="da_ai_btn"):
         local_rep = build_local_stats_summary(da_view)
-        p_da = (
-            "तुम I'm AI Buddy हो — एक सीनियर डेटा एनालिस्ट। इस डेटासेट की मुख्य बातें, पैटर्न, "
-            "और डेटा क्वालिटी के बारे में सरल हिंदी में संक्षिप्त रिपोर्ट दो:\n" + local_rep
-        )
-        with st.spinner(f"{selected_provider} से एनालिसिस रिपोर्ट बन रही है..."):
+        if is_en():
+            p_da = (
+                "You are I'm AI Buddy — a senior Data Analyst. Write a clear, concise summary report in English "
+                "covering key findings, patterns, and data quality notes for this dataset:\n" + local_rep
+            )
+        else:
+            p_da = (
+                "तुम I'm AI Buddy हो — एक सीनियर डेटा एनालिस्ट। इस डेटासेट की मुख्य बातें, पैटर्न, "
+                "और डेटा क्वालिटी के बारे में सरल हिंदी में संक्षिप्त रिपोर्ट दो:\n" + local_rep
+            )
+        with st.spinner(T(f"{selected_provider} से एनालिसिस रिपोर्ट बन रही है...", f"Generating analysis report via {selected_provider}...")):
             ans, err = call_ai_provider(ai_config, p_da)
-        st.session_state.da_ai_summary = ans if ans else f"{local_rep}\n\n*(AI नोट: {err})*"
+        st.session_state.da_ai_summary = ans if ans else f"{local_rep}\n\n*(AI Note: {err})*"
 
     if st.session_state.da_ai_summary:
         st.markdown(st.session_state.da_ai_summary)
@@ -1449,7 +1591,7 @@ with tab_da:
         report_sections.extend(["", "## AI Analysis Insights", st.session_state.da_ai_summary])
 
     st.download_button(
-        "📄 पूरी Analysis रिपोर्ट डाउनलोड करें (.md)",
+        T("📄 पूरी Analysis रिपोर्ट डाउनलोड करें (.md)", "📄 Download Full Analysis Report (.md)"),
         data="\n".join(report_sections).encode("utf-8"),
         file_name="im_ai_buddy_analysis_report.md",
         mime="text/markdown",
@@ -1460,7 +1602,7 @@ with tab_da:
 # TAB 2: SQL STUDIO
 # ------------------------------------------------------------------------------
 with tab_sql:
-    st.header("🗄️ SQL एनालिस्ट स्टूडियो (टेबल नाम: `dataset`)")
+    st.header(T("🗄️ SQL एनालिस्ट स्टूडियो (टेबल नाम: `dataset`)", "🗄️ SQL Analyst Studio (Table Name: `dataset`)"))
 
     sql_cats = active_df.select_dtypes(exclude="number").columns.tolist()
     sql_nums = active_df.select_dtypes(include="number").columns.tolist()
@@ -1471,40 +1613,51 @@ with tab_sql:
     eng_opts = ["DuckDB (Window + CTE)", "SQLite3 (Built-in)"] if HAS_DUCKDB else ["SQLite3 (Built-in)"]
     s_top1, s_top2 = st.columns([2, 3])
     with s_top1:
-        chosen_engine = st.selectbox("SQL इंजन:", eng_opts, key="sql_eng_sel")
+        chosen_engine = st.selectbox(T("SQL इंजन:", "SQL Engine:"), eng_opts, key="sql_eng_sel")
     with s_top2:
         nl_sql = st.text_input(
-            "हिंदी/इंग्लिश में सवाल लिखें → AI SQL बनाएगा:",
-            placeholder="जैसे: हर Category का कुल Revenue और औसत निकालो",
+            T("हिंदी/इंग्लिश में सवाल लिखें → AI SQL बनाएगा:", "Ask in English/Hindi → AI will write SQL:"),
+            placeholder=T(
+                "जैसे: हर Category का कुल Revenue और औसत निकालो",
+                "e.g., Calculate total revenue and average per category",
+            ),
             key="sql_nl_box",
         )
-        if st.button("✨ AI से SQL लिखवाएं", key="sql_gen_btn") and nl_sql.strip():
+        if st.button(T("✨ AI से SQL लिखवाएं", "✨ Generate SQL with AI"), key="sql_gen_btn") and nl_sql.strip():
             cols_desc = ", ".join([f"{c} ({str(active_df[c].dtype)})" for c in active_df.columns])
             p_sql = (
                 f"Write ONLY a valid SQL query for table `dataset` with columns: {cols_desc}.\n"
                 f"User request: {nl_sql.strip()}\nNo markdown fences, no explanation."
             )
-            with st.spinner(f"{selected_provider} से SQL तैयार हो रहा है..."):
+            with st.spinner(T(f"{selected_provider} से SQL तैयार हो रहा है...", f"Generating SQL via {selected_provider}...")):
                 q_gen, q_err = call_ai_provider(ai_config, p_sql)
             if q_gen:
-                q_clean = re.sub(r"^```(?:sql)?\s*", "", q_gen.strip(), flags=re.I)
+                q_clean = re.sub(r"\n\n\*\(Provider:.*?\)\*$", "", q_gen.strip())
+                q_clean = re.sub(r"^```(?:sql)?\s*", "", q_clean, flags=re.I)
                 q_clean = re.sub(r"\s*```$", "", q_clean).strip()
                 set_sql_editor_query(q_clean)
-                st.session_state.sql_ai_msg = f"{selected_provider} ने SQL क्वेरी नीचे एडिटर में भर दी है।"
+                st.session_state.sql_ai_msg = T(
+                    f"{selected_provider} ने SQL क्वेरी नीचे एडिटर में भर दी है।",
+                    f"{selected_provider} has populated the SQL query in the editor below.",
+                )
                 st.rerun()
             else:
-                st.warning(f"AI SQL जनरेट नहीं हो सका: {q_err}")
+                st.warning(T(f"AI SQL जनरेट नहीं हो सका: {q_err}", f"Could not generate AI SQL: {q_err}"))
 
     if st.session_state.sql_ai_msg:
         st.info(st.session_state.sql_ai_msg)
 
-    st.subheader("📚 सभी Analysis SQL Queries (बॉक्स से चुनें)")
+    st.subheader(T("📚 सभी Analysis SQL Queries (बॉक्स से चुनें)", "📚 All Analysis SQL Queries (Select from Box)"))
     q_box_c1, q_box_c2 = st.columns([3, 1])
     with q_box_c1:
-        selected_q_name = st.selectbox("तैयार Analysis SQL Query चुनें:", list(analysis_queries_map.keys()), key="sql_all_queries_box")
+        selected_q_name = st.selectbox(
+            T("तैयार Analysis SQL Query चुनें:", "Select Ready-to-Run SQL Query:"),
+            list(analysis_queries_map.keys()),
+            key="sql_all_queries_box",
+        )
     with q_box_c2:
         st.write("")
-        if st.button("📥 क्वेरी एडिटर में डालें", key="sql_load_box_btn"):
+        if st.button(T("📥 क्वेरी एडिटर में डालें", "📥 Load into Editor"), key="sql_load_box_btn"):
             set_sql_editor_query(analysis_queries_map[selected_q_name])
             st.rerun()
 
@@ -1513,9 +1666,9 @@ with tab_sql:
         set_sql_editor_query(analysis_queries_map[selected_q_name])
         st.rerun()
 
-    st.text_area("SQL क्वेरी एडिटर:", height=175, key="sql_text_area", on_change=_sync_sql_from_area)
+    st.text_area(T("SQL क्वेरी एडिटर:", "SQL Query Editor:"), height=175, key="sql_text_area", on_change=_sync_sql_from_area)
 
-    if st.button("▶️ SQL क्वेरी चलाएं", type="primary", key="sql_run_btn"):
+    if st.button(T("▶️ SQL क्वेरी चलाएं", "▶️ Run SQL Query"), type="primary", key="sql_run_btn"):
         r_df, r_err = run_sql_engine(chosen_engine, active_df, st.session_state.sql_text_area)
         st.session_state.sql_res_df = r_df
         st.session_state.sql_err_msg = r_err
@@ -1525,10 +1678,15 @@ with tab_sql:
 
     if st.session_state.sql_res_df is not None:
         out_sql = st.session_state.sql_res_df
-        st.success(f"परिणाम: {len(out_sql)} पंक्तियाँ × {len(out_sql.columns)} कॉलम")
+        st.success(
+            T(
+                f"परिणाम: {len(out_sql)} पंक्तियाँ × {len(out_sql.columns)} कॉलम",
+                f"Result: {len(out_sql)} rows × {len(out_sql.columns)} columns",
+            )
+        )
         st.dataframe(out_sql, use_container_width=True)
         st.download_button(
-            "📥 SQL रिजल्ट डाउनलोड करें (.csv)",
+            T("📥 SQL रिजल्ट डाउनलोड करें (.csv)", "📥 Download SQL Result (.csv)"),
             data=out_sql.to_csv(index=False).encode("utf-8"),
             file_name="im_ai_buddy_sql_output.csv",
             mime="text/csv",
@@ -1539,7 +1697,7 @@ with tab_sql:
 # TAB 3: POWER BI AI STUDIO
 # ------------------------------------------------------------------------------
 with tab_pbi:
-    st.header("📈 Power BI AI डैशबोर्ड स्टूडियो (9 Charts + AI Background)")
+    st.header(T("📈 Power BI AI डैशबोर्ड स्टूडियो (9 Charts + AI Background)", "📈 Power BI AI Dashboard Studio (9 Charts + AI Background)"))
 
     if st.session_state.bi_bg_img is None:
         im, src = generate_ai_bg_image(
@@ -1551,28 +1709,28 @@ with tab_pbi:
 
     p_cfg1, p_cfg2, p_cfg3, p_cfg4 = st.columns([1.2, 1.2, 1.2, 1.4])
     with p_cfg1:
-        bi_chart_count = st.slider("चार्ट्स की संख्या:", 1, 9, 4, key="bi_num_charts")
+        bi_chart_count = st.slider(T("चार्ट्स की संख्या:", "Number of Charts:"), 1, 9, 4, key="bi_num_charts")
     with p_cfg2:
-        bi_top_n = st.slider("Top N कैटेगरी:", 3, 15, 7, key="bi_topn")
+        bi_top_n = st.slider(T("Top N कैटेगरी:", "Top N Categories:"), 3, 15, 7, key="bi_topn")
     with p_cfg3:
-        bi_use_bg = st.checkbox("बैकग्राउंड इमेज दिखाएं", value=True, key="bi_bg_chk")
-        bi_opacity = st.slider("इमेज Opacity:", 0.06, 0.45, 0.16, 0.02, key="bi_opac")
+        bi_use_bg = st.checkbox(T("बैकग्राउंड इमेज दिखाएं", "Show Background Image"), value=True, key="bi_bg_chk")
+        bi_opacity = st.slider(T("इमेज Opacity:", "Image Opacity:"), 0.06, 0.45, 0.16, 0.02, key="bi_opac")
     with p_cfg4:
         bi_bg_prompt = st.text_input(
-            "AI बैकग्राउंड थीम:",
+            T("AI बैकग्राउंड थीम:", "AI Background Theme:"),
             value="Minimalist soft pastel geometric presentation background, no text",
             key="bi_bg_prm",
         )
-        if st.button("🎨 नई AI बैकग्राउंड इमेज", key="bi_new_bg_btn"):
-            with st.spinner("बैकग्राउंड बन रहा है..."):
+        if st.button(T("🎨 नई AI बैकग्राउंड इमेज", "🎨 Generate New AI Background"), key="bi_new_bg_btn"):
+            with st.spinner(T("बैकग्राउंड बन रहा है...", "Generating background...")):
                 nim, nsrc = generate_ai_bg_image(gemini_key, bi_bg_prompt)
                 st.session_state.bi_bg_img = nim
                 st.session_state.bi_bg_src = nsrc
             st.rerun()
 
-    with st.expander("✏️ Power BI डेटा सेल एडिट करें (Live Update)", expanded=False):
+    with st.expander(T("✏️ Power BI डेटा सेल एडिट करें (Live Update)", "✏️ Edit Power BI Data Cells (Live Update)"), expanded=False):
         edited_bi_grid = st.data_editor(active_df, num_rows="dynamic", use_container_width=True, key="bi_grid_edit")
-        if st.button("💾 एडिट किया हुआ डेटा सेव करें", key="bi_save_grid"):
+        if st.button(T("💾 एडिट किया हुआ डेटा सेव करें", "💾 Save Edited Data"), key="bi_save_grid"):
             st.session_state.uni_df = edited_bi_grid
             st.rerun()
 
@@ -1583,7 +1741,7 @@ with tab_pbi:
     bi_view = active_df.copy()
     slicer_cols = [c for c in bi_cats if 1 < active_df[c].nunique(dropna=True) <= 50]
     if slicer_cols:
-        st.subheader("🎛️ Slicers / फ़िल्टर्स")
+        st.subheader(T("🎛️ Slicers / फ़िल्टर्स", "🎛️ Slicers / Filters"))
         sc_boxes = st.columns(min(3, len(slicer_cols)))
         for i, sc in enumerate(slicer_cols[:3]):
             s_sl = get_1d_series(active_df, sc)
@@ -1594,25 +1752,25 @@ with tab_pbi:
 
     st.subheader("📌 KPI Cards")
     kc1, kc2, kc3, kc4 = st.columns(4)
-    kc1.metric("कुल रिकॉर्ड्स", f"{len(bi_view):,}")
+    kc1.metric(T("कुल रिकॉर्ड्स", "Total Records"), f"{len(bi_view):,}")
     if bi_nums:
-        kpi_num = st.selectbox("KPI Numeric कॉलम:", bi_nums, key="pbi_kpi_num")
+        kpi_num = st.selectbox(T("KPI Numeric कॉलम:", "KPI Numeric Column:"), bi_nums, key="pbi_kpi_num")
         s_kv = pd.to_numeric(get_1d_series(bi_view, kpi_num), errors="coerce").dropna()
-        kc2.metric(f"कुल {kpi_num}", f"{s_kv.sum():,.2f}" if not s_kv.empty else "0")
-        kc3.metric(f"औसत {kpi_num}", f"{s_kv.mean():,.2f}" if not s_kv.empty else "0")
+        kc2.metric(T(f"कुल {kpi_num}", f"Total {kpi_num}"), f"{s_kv.sum():,.2f}" if not s_kv.empty else "0")
+        kc3.metric(T(f"औसत {kpi_num}", f"Avg {kpi_num}"), f"{s_kv.mean():,.2f}" if not s_kv.empty else "0")
     else:
         kpi_num = None
-        kc2.metric("Numeric कॉलम", "0")
-        kc3.metric("Text कॉलम", str(len(bi_cats)))
+        kc2.metric(T("Numeric कॉलम", "Numeric Columns"), "0")
+        kc3.metric(T("Text कॉलम", "Text Columns"), str(len(bi_cats)))
 
     if bi_cats:
-        kpi_cat = st.selectbox("KPI Category कॉलम:", bi_cats, key="pbi_kpi_cat")
+        kpi_cat = st.selectbox(T("KPI Category कॉलम:", "KPI Category Column:"), bi_cats, key="pbi_kpi_cat")
         vc_k = get_1d_series(bi_view, kpi_cat).dropna().astype(str).value_counts()
         kc4.metric(f"Top {kpi_cat}", f"{vc_k.index[0]} ({vc_k.iloc[0]})" if not vc_k.empty else "N/A")
     else:
         kc4.metric("Nulls", str(int(bi_view.isna().sum().sum())))
 
-    st.subheader(f"📊 डैशबोर्ड विज़ुअल्स ({bi_chart_count} Charts)")
+    st.subheader(T(f"📊 डैशबोर्ड विज़ुअल्स ({bi_chart_count} Charts)", f"📊 Dashboard Visuals ({bi_chart_count} Charts)"))
     all_9_charts = ["Horizontal Bar", "Bar", "Stacked Bar", "Line", "Area", "Donut", "Scatter", "Histogram", "Box"]
     agg_choices = ["Sum", "Avg", "Count", "Max"]
 
@@ -1637,7 +1795,7 @@ with tab_pbi:
                     if ch_type == "Stacked Bar":
                         st_opts = [c for c in bi_all if c != x_c]
                         if st_opts:
-                            st_c = st.selectbox("Stack / Legend कॉलम:", st_opts, key=f"pbi_st_{idx_c}")
+                            st_c = st.selectbox(T("Stack / Legend कॉलम:", "Stack / Legend Column:"), st_opts, key=f"pbi_st_{idx_c}")
 
                     img_out = render_bi_chart_with_bg(
                         bi_view,
@@ -1656,29 +1814,49 @@ with tab_pbi:
     st.divider()
     d_col1, d_col2 = st.columns(2)
     with d_col1:
-        dax_req = st.text_input("DAX फ़ॉर्मूला बनवाएं:", placeholder="जैसे: Total Revenue, Profit Margin %, या Rank", key="pbi_dax_in")
-        if st.button("📐 DAX जनरेट करें", key="pbi_dax_btn") and dax_req.strip():
-            p_d = (
-                f"Write a clean Power BI DAX measure for columns {bi_all} and requirement: {dax_req.strip()}. "
-                "Give short Hindi explanation + DAX code."
-            )
-            with st.spinner(f"{selected_provider} से DAX बन रहा है..."):
+        dax_req = st.text_input(
+            T("DAX फ़ॉर्मूला बनवाएं:", "Generate DAX Formula:"),
+            placeholder=T("जैसे: Total Revenue, Profit Margin %, या Rank", "e.g., Total Revenue, Profit Margin %, or Rank"),
+            key="pbi_dax_in",
+        )
+        if st.button(T("📐 DAX जनरेट करें", "📐 Generate DAX"), key="pbi_dax_btn") and dax_req.strip():
+            lang_inst = "Give short English explanation + DAX code." if is_en() else "Give short Hindi explanation + DAX code."
+            p_d = f"Write a clean Power BI DAX measure for columns {bi_all} and requirement: {dax_req.strip()}. {lang_inst}"
+            with st.spinner(T(f"{selected_provider} से DAX बन रहा है...", f"Generating DAX via {selected_provider}...")):
                 dt, de = call_ai_provider(ai_config, p_d)
             st.session_state.bi_dax_code = (
-                dt if dt else f"DAX जनरेट नहीं हो सका ({de})।\nउदाहरण: `Total {kpi_num or 'Value'} = SUM('Table'[{kpi_num or 'Amount'}])`"
+                dt
+                if dt
+                else T(
+                    f"DAX जनरेट नहीं हो सका ({de})।\nउदाहरण: `Total {kpi_num or 'Value'} = SUM('Table'[{kpi_num or 'Amount'}])`",
+                    f"Could not generate DAX ({de}).\nExample: `Total {kpi_num or 'Value'} = SUM('Table'[{kpi_num or 'Amount'}])`",
+                )
             )
         if st.session_state.bi_dax_code:
             st.markdown(st.session_state.bi_dax_code)
 
     with d_col2:
-        if st.button("🧠 AI डैशबोर्ड सुझाव लें", key="pbi_rev_btn"):
-            p_r = (
-                f"तुम I'm AI Buddy — एक Power BI विशेषज्ञ हो। इस डैशबोर्ड डेटा के लिए सरल हिंदी में "
-                f"4 मुख्य सुझाव और KPI निष्कर्ष लिखो: कॉलम = {bi_all}, पंक्तियाँ = {len(bi_view)}"
-            )
-            with st.spinner(f"{selected_provider} से BI रिव्यू तैयार हो रहा है..."):
+        if st.button(T("🧠 AI डैशबोर्ड सुझाव लें", "🧠 Get AI Dashboard Insights"), key="pbi_rev_btn"):
+            if is_en():
+                p_r = (
+                    f"You are I'm AI Buddy — a Power BI expert. Write 4 key dashboard recommendations and KPI insights "
+                    f"in English for this dataset: columns = {bi_all}, rows = {len(bi_view)}"
+                )
+            else:
+                p_r = (
+                    f"तुम I'm AI Buddy — एक Power BI विशेषज्ञ हो। इस डैशबोर्ड डेटा के लिए सरल हिंदी में "
+                    f"4 मुख्य सुझाव और KPI निष्कर्ष लिखो: कॉलम = {bi_all}, पंक्तियाँ = {len(bi_view)}"
+                )
+            with st.spinner(T(f"{selected_provider} से BI रिव्यू तैयार हो रहा है...", f"Generating BI review via {selected_provider}...")):
                 rt, re_msg = call_ai_provider(ai_config, p_r)
-            st.session_state.bi_ai_review = rt if rt else f"लोकल BI नोट: कुल पंक्तियाँ = {len(bi_view)} ({re_msg})"
+            st.session_state.bi_ai_review = (
+                rt
+                if rt
+                else T(
+                    f"लोकल BI नोट: कुल पंक्तियाँ = {len(bi_view)} ({re_msg})",
+                    f"Local BI Note: Total rows = {len(bi_view)} ({re_msg})",
+                )
+            )
         if st.session_state.bi_ai_review:
             st.markdown(st.session_state.bi_ai_review)
 
@@ -1686,20 +1864,29 @@ with tab_pbi:
 # TAB 4: COMPLETE DATA SCIENCE STUDIO + ALL FUNCTIONS BOX + ONE-CLICK AI REPORT
 # ------------------------------------------------------------------------------
 with tab_ds:
-    st.header("🧠 Complete Data Science Studio (Cleaning, Features, Algorithms & One-Click AI Report)")
+    st.header(
+        T(
+            "🧠 Complete Data Science Studio (Cleaning, Features, Algorithms & One-Click AI Report)",
+            "🧠 Complete Data Science Studio (Cleaning, Features, Algorithms & One-Click AI Report)",
+        )
+    )
 
     ds_nums = active_df.select_dtypes(include="number").columns.tolist()
     ds_cats = active_df.select_dtypes(exclude="number").columns.tolist()
     ds_all = active_df.columns.tolist()
 
     # --- SECTION 0: ALL DATA SCIENCE FUNCTIONS & ALGORITHMS BOX / LIST ---
-    with st.expander("📦 Data Science Function & Algorithm Box (सभी उपलब्ध टूल्स की सूची)", expanded=True):
+    with st.expander(
+        T("📦 Data Science Function & Algorithm Box (सभी उपलब्ध टूल्स की सूची)", "📦 Data Science Function & Algorithm Box (All Available Tools)"),
+        expanded=True,
+    ):
+        all_fn_lbl = "All Functions (Show All)" if is_en() else "All Functions (सभी एक साथ)"
         cat_box_sel = st.selectbox(
-            "Data Science Category Box चुनें:",
-            ["All Functions (सभी एक साथ)"] + list(DS_FUNCTION_CATALOG.keys()),
+            T("Data Science Category Box चुनें:", "Select Data Science Category Box:"),
+            [all_fn_lbl] + list(DS_FUNCTION_CATALOG.keys()),
             key="ds_func_cat_box",
         )
-        if cat_box_sel == "All Functions (सभी एक साथ)":
+        if cat_box_sel == all_fn_lbl:
             f_cols = st.columns(2)
             items_list = list(DS_FUNCTION_CATALOG.items())
             for idx_cat, (grp_title, fn_list) in enumerate(items_list):
@@ -1712,27 +1899,43 @@ with tab_ds:
                     )
         else:
             chosen_fn_item = st.selectbox(
-                f"{cat_box_sel} — उपलब्ध Functions / Algorithms:",
+                T(f"{cat_box_sel} — उपलब्ध Functions / Algorithms:", f"{cat_box_sel} — Available Functions / Algorithms:"),
                 DS_FUNCTION_CATALOG[cat_box_sel],
                 key="ds_fn_single_box",
             )
-            st.info(f"चयनित टूल: **{chosen_fn_item}** — नीचे संबंधित सेक्शन में जाकर इसे सीधे डेटा पर लागू करें।")
+            st.info(
+                T(
+                    f"चयनित टूल: **{chosen_fn_item}** — नीचे संबंधित सेक्शन में जाकर इसे सीधे डेटा पर लागू करें।",
+                    f"Selected Tool: **{chosen_fn_item}** — Use the corresponding section below to apply it directly to your data.",
+                )
+            )
 
         if st.session_state.ds_action_log:
-            st.markdown("**📝 Applied Transformation Log:**")
+            st.markdown(T("**📝 Applied Transformation Log:**", "**📝 Applied Transformation Log:**"))
             for act_item in st.session_state.ds_action_log[-8:]:
                 st.caption(f"• {act_item}")
 
     # --- SECTION 1: DATA SCIENCE CLEANING & CUSTOM ADD/MODIFY STUDIO ---
-    st.subheader("🛠️ 1. Data Cleaning & Custom Column/Row Builder (जो चाहें जोड़ें या बदलें)")
-    with st.expander("🧹 Cleaning, Type Casting, Outlier Clipping & Custom Column/Formula", expanded=True):
+    st.subheader(
+        T(
+            "🛠️ 1. Data Cleaning & Custom Column/Row Builder (जो चाहें जोड़ें या बदलें)",
+            "🛠️ 1. Data Cleaning & Custom Column/Row Builder (Add or Modify Anything)",
+        )
+    )
+    with st.expander(
+        T(
+            "🧹 Cleaning, Type Casting, Outlier Clipping & Custom Column/Formula",
+            "🧹 Cleaning, Type Casting, Outlier Clipping & Custom Column/Formula",
+        ),
+        expanded=True,
+    ):
         cl_t1, cl_t2, cl_t3 = st.columns(3)
 
         with cl_t1:
             st.markdown("**A. Missing Value Imputation & Cleaning**")
-            imp_cols = st.multiselect("कॉलम्स चुनें:", ds_all, default=ds_all[: min(3, len(ds_all))], key="ds_imp_cols")
+            imp_cols = st.multiselect(T("कॉलम्स चुनें:", "Select Columns:"), ds_all, default=ds_all[: min(3, len(ds_all))], key="ds_imp_cols")
             imp_method = st.selectbox(
-                "Imputation / Cleaning तरीका:",
+                T("Imputation / Cleaning तरीका:", "Imputation / Cleaning Method:"),
                 [
                     "Median (Numeric)",
                     "Mean (Numeric)",
@@ -1745,8 +1948,8 @@ with tab_ds:
                 ],
                 key="ds_imp_method",
             )
-            const_val = st.text_input("Constant मान (यदि Constant चुना है):", value="0", key="ds_const_val")
-            if st.button("✅ Cleaning लागू करें", key="ds_apply_clean_btn"):
+            const_val = st.text_input(T("Constant मान (यदि Constant चुना है):", "Constant Value (if selected):"), value="0", key="ds_const_val")
+            if st.button(T("✅ Cleaning लागू करें", "✅ Apply Cleaning"), key="ds_apply_clean_btn"):
                 tmp = active_df.copy()
                 if imp_method == "Drop Duplicates":
                     tmp = tmp.drop_duplicates().reset_index(drop=True)
@@ -1783,13 +1986,13 @@ with tab_ds:
 
         with cl_t2:
             st.markdown("**B. Data Type Casting & Outlier Handling**")
-            cast_col = st.selectbox("कॉलम चुनें:", ds_all, key="ds_cast_col")
+            cast_col = st.selectbox(T("कॉलम चुनें:", "Select Column:"), ds_all, key="ds_cast_col")
             cast_type = st.selectbox(
-                "नया Data Type:",
+                T("नया Data Type:", "New Data Type:"),
                 ["Numeric (float/int)", "String / Text", "Datetime", "Category"],
                 key="ds_cast_type",
             )
-            if st.button("🔄 Type बदलें", key="ds_apply_cast_btn"):
+            if st.button(T("🔄 Type बदलें", "🔄 Convert Type"), key="ds_apply_cast_btn"):
                 tmp = active_df.copy()
                 s_c = get_1d_series(tmp, cast_col)
                 if cast_type.startswith("Numeric"):
@@ -1805,9 +2008,10 @@ with tab_ds:
                 st.rerun()
 
             if ds_nums:
-                out_col = st.selectbox("Outlier कॉलम:", ds_nums, key="ds_out_col")
-                out_act = st.selectbox("Outlier Action:", ["IQR Clip (सीमा में रखें)", "Remove IQR Outliers"], key="ds_out_act")
-                if st.button("📉 Outlier ठीक करें", key="ds_apply_out_btn"):
+                out_col = st.selectbox(T("Outlier कॉलम:", "Outlier Column:"), ds_nums, key="ds_out_col")
+                out_opts = ["IQR Clip (Cap to Bounds)", "Remove IQR Outliers"] if is_en() else ["IQR Clip (सीमा में रखें)", "Remove IQR Outliers"]
+                out_act = st.selectbox("Outlier Action:", out_opts, key="ds_out_act")
+                if st.button(T("📉 Outlier ठीक करें", "📉 Handle Outliers"), key="ds_apply_out_btn"):
                     tmp = active_df.copy()
                     s_o = pd.to_numeric(get_1d_series(tmp, out_col), errors="coerce")
                     q1, q3 = s_o.quantile(0.25), s_o.quantile(0.75)
@@ -1822,13 +2026,17 @@ with tab_ds:
                     st.rerun()
 
         with cl_t3:
-            st.markdown("**C. Add Custom Column / Formula / Filter Rows**")
-            new_col_name = st.text_input("नया कॉलम नाम:", placeholder="जैसे: total_score या log_price", key="ds_new_col_name")
+            st.markdown("**C. Add Custom Column / Formula / Drop Columns**")
+            new_col_name = st.text_input(
+                T("नया कॉलम नाम:", "New Column Name:"),
+                placeholder=T("जैसे: total_score या log_price", "e.g., total_score or log_price"),
+                key="ds_new_col_name",
+            )
             if len(ds_nums) >= 2:
-                f_c1 = st.selectbox("कॉलम 1:", ds_nums, index=0, key="ds_f_c1")
-                f_op = st.selectbox("ऑपरेटर:", ["+", "-", "*", "/", "Percentage (c1/c2*100)", "Diff % ((c2-c1)/c1*100)"], key="ds_f_op")
-                f_c2 = st.selectbox("कॉलम 2:", ds_nums, index=min(1, len(ds_nums) - 1), key="ds_f_c2")
-                if st.button("➕ नया कॉलम जोड़ें", key="ds_add_calc_btn") and new_col_name.strip():
+                f_c1 = st.selectbox(T("कॉलम 1:", "Column 1:"), ds_nums, index=0, key="ds_f_c1")
+                f_op = st.selectbox(T("ऑपरेटर:", "Operator:"), ["+", "-", "*", "/", "Percentage (c1/c2*100)", "Diff % ((c2-c1)/c1*100)"], key="ds_f_op")
+                f_c2 = st.selectbox(T("कॉलम 2:", "Column 2:"), ds_nums, index=min(1, len(ds_nums) - 1), key="ds_f_c2")
+                if st.button(T("➕ नया कॉलम जोड़ें", "➕ Add New Column"), key="ds_add_calc_btn") and new_col_name.strip():
                     tmp = active_df.copy()
                     a_s = pd.to_numeric(get_1d_series(tmp, f_c1), errors="coerce")
                     b_s = pd.to_numeric(get_1d_series(tmp, f_c2), errors="coerce")
@@ -1848,8 +2056,8 @@ with tab_ds:
                     log_ds_action(f"Added Column '{new_col_name.strip()}' ({f_c1} {f_op} {f_c2})")
                     st.rerun()
 
-            drop_c_sel = st.multiselect("हटाने योग्य कॉलम्स (Drop Columns):", ds_all, key="ds_drop_cols_sel")
-            if st.button("🗑️ चुने हुए कॉलम हटाएं", key="ds_drop_cols_btn") and drop_c_sel:
+            drop_c_sel = st.multiselect(T("हटाने योग्य कॉलम्स (Drop Columns):", "Columns to Drop:"), ds_all, key="ds_drop_cols_sel")
+            if st.button(T("🗑️ चुने हुए कॉलम हटाएं", "🗑️ Drop Selected Columns"), key="ds_drop_cols_btn") and drop_c_sel:
                 keep_c = [c for c in ds_all if c not in drop_c_sel]
                 if keep_c:
                     st.session_state.uni_df = active_df[keep_c].copy()
@@ -1863,7 +2071,7 @@ with tab_ds:
             fe_c1, fe_c2, fe_c3 = st.columns(3)
             with fe_c1:
                 st.markdown("**Numeric Transform / Scaling**")
-                fe_num_col = st.selectbox("Numeric कॉलम:", ds_nums if ds_nums else ds_all, key="ds_fe_num_col")
+                fe_num_col = st.selectbox(T("Numeric कॉलम:", "Numeric Column:"), ds_nums if ds_nums else ds_all, key="ds_fe_num_col")
                 fe_num_op = st.selectbox(
                     "Transformation:",
                     [
@@ -1876,7 +2084,7 @@ with tab_ds:
                     ],
                     key="ds_fe_num_op",
                 )
-                if st.button("⚡ Feature लागू करें", key="ds_fe_num_btn") and ds_nums:
+                if st.button(T("⚡ Feature लागू करें", "⚡ Apply Feature Transform"), key="ds_fe_num_btn") and ds_nums:
                     tmp = active_df.copy()
                     s_v = pd.to_numeric(get_1d_series(tmp, fe_num_col), errors="coerce")
                     arr_2d = s_v.fillna(s_v.median()).to_numpy().reshape(-1, 1)
@@ -1899,13 +2107,13 @@ with tab_ds:
 
             with fe_c2:
                 st.markdown("**Categorical Encoding / Date Parts**")
-                fe_cat_col = st.selectbox("Category/Date कॉलम:", ds_cats if ds_cats else ds_all, key="ds_fe_cat_col")
+                fe_cat_col = st.selectbox(T("Category/Date कॉलम:", "Category/Date Column:"), ds_cats if ds_cats else ds_all, key="ds_fe_cat_col")
                 fe_cat_op = st.selectbox(
                     "Encoding / Extraction:",
                     ["Ordinal Codes (0, 1, 2...)", "Frequency Encoding (Count)", "Extract Year / Month / Day"],
                     key="ds_fe_cat_op",
                 )
-                if st.button("🏷️ Encode / Extract करें", key="ds_fe_cat_btn"):
+                if st.button(T("🏷️ Encode / Extract करें", "🏷️ Encode / Extract"), key="ds_fe_cat_btn"):
                     tmp = active_df.copy()
                     s_ct = get_1d_series(tmp, fe_cat_col)
                     if fe_cat_op.startswith("Ordinal"):
@@ -1927,9 +2135,9 @@ with tab_ds:
             with fe_c3:
                 st.markdown("**PCA Dimensionality Reduction**")
                 if len(ds_nums) >= 2:
-                    pca_cols = st.multiselect("PCA Numeric कॉलम्स:", ds_nums, default=ds_nums[: min(4, len(ds_nums))], key="ds_pca_cols")
+                    pca_cols = st.multiselect(T("PCA Numeric कॉलम्स:", "PCA Numeric Columns:"), ds_nums, default=ds_nums[: min(4, len(ds_nums))], key="ds_pca_cols")
                     n_comp = st.slider("Components:", 1, min(4, len(pca_cols) if pca_cols else 2), min(2, len(pca_cols) if pca_cols else 2), key="ds_pca_n")
-                    if st.button("🧭 PCA जोड़ें", key="ds_pca_btn") and len(pca_cols) >= n_comp:
+                    if st.button(T("🧭 PCA जोड़ें", "🧭 Add PCA Features"), key="ds_pca_btn") and len(pca_cols) >= n_comp:
                         tmp = active_df.copy()
                         mat_p = tmp[pca_cols].apply(pd.to_numeric, errors="coerce")
                         valid_p = mat_p.notna().all(axis=1)
@@ -1946,22 +2154,27 @@ with tab_ds:
                             log_ds_action(f"PCA Added ({ev_str})")
                             st.rerun()
                 else:
-                    st.info("PCA के लिए कम से कम 2 Numeric कॉलम चाहिए।")
+                    st.info(T("PCA के लिए कम से कम 2 Numeric कॉलम चाहिए।", "At least 2 numeric columns are required for PCA."))
 
     # --- SECTION 3: PREDICTIVE MODELING STUDIO (ALL REGRESSION & CLASSIFICATION ALGORITHMS) ---
-    st.subheader("🔮 3. Predictive Modeling Studio (सभी Supervised Algorithms)")
+    st.subheader(T("🔮 3. Predictive Modeling Studio (सभी Supervised Algorithms)", "🔮 3. Predictive Modeling Studio (All Supervised Algorithms)"))
     if not HAS_SKLEARN:
-        st.warning("असली ML Prediction मॉडल चलाने के लिए `scikit-learn` इंस्टॉल करें: `pip install scikit-learn`")
+        st.warning(
+            T(
+                "असली ML Prediction मॉडल चलाने के लिए `scikit-learn` इंस्टॉल करें: `pip install scikit-learn`",
+                "Install `scikit-learn` to run ML prediction models: `pip install scikit-learn`",
+            )
+        )
     else:
         ml_c1, ml_c2, ml_c3, ml_c4, ml_c5 = st.columns([1.2, 1.2, 1.5, 0.9, 1.0])
         with ml_c1:
-            ml_task = st.selectbox("Prediction प्रकार चुनें:", ["Regression (Numeric)", "Classification (Category)"], key="ds_ml_task")
+            ml_task = st.selectbox(T("Prediction प्रकार चुनें:", "Select Prediction Task:"), ["Regression (Numeric)", "Classification (Category)"], key="ds_ml_task")
         with ml_c2:
             if ml_task.startswith("Regression"):
                 tgt_opts = ds_nums if ds_nums else ds_all
             else:
                 tgt_opts = [c for c in ds_all if 1 < active_df[c].nunique(dropna=True) <= 25] or ds_all
-            ml_target = st.selectbox("Target कॉलम:", tgt_opts, key="ds_ml_target")
+            ml_target = st.selectbox(T("Target कॉलम:", "Target Column:"), tgt_opts, key="ds_ml_target")
         with ml_c3:
             safe_feat_cands = [
                 c for c in ds_all
@@ -1969,7 +2182,7 @@ with tab_ds:
             ]
             feat_cands = safe_feat_cands if safe_feat_cands else [c for c in ds_all if c != ml_target]
             ml_features = st.multiselect(
-                "Feature कॉलम्स (X):",
+                T("Feature कॉलम्स (X):", "Feature Columns (X):"),
                 feat_cands,
                 default=feat_cands[: min(5, len(feat_cands))],
                 key="ds_ml_feats",
@@ -1987,19 +2200,19 @@ with tab_ds:
             def_algos = ["Logistic Regression", "Random Forest Classifier", "Gradient Boosting Classifier"]
 
         chosen_algos = st.multiselect(
-            "ट्रेन करने के लिए Algorithms चुनें (List/Box):",
+            T("ट्रेन करने के लिए Algorithms चुनें (List/Box):", "Select Algorithms to Train (List/Box):"),
             avail_algos,
             default=def_algos,
             key="ds_chosen_algos",
         )
 
-        if st.button("🚀 चुने हुए मॉडल ट्रेन करें और तुलना देखें", type="primary", key="ds_train_btn"):
+        if st.button(T("🚀 चुने हुए मॉडल ट्रेन करें और तुलना देखें", "🚀 Train Selected Models & Compare"), type="primary", key="ds_train_btn"):
             if not ml_features:
-                st.error("कृपया कम से कम 1 Feature कॉलम चुनें।")
+                st.error(T("कृपया कम से कम 1 Feature कॉलम चुनें।", "Please select at least 1 feature column."))
             elif not chosen_algos:
-                st.error("कृपया कम से कम 1 Algorithm चुनें।")
+                st.error(T("कृपया कम से कम 1 Algorithm चुनें।", "Please select at least 1 algorithm."))
             else:
-                with st.spinner("मॉडल ट्रेन हो रहे हैं..."):
+                with st.spinner(T("मॉडल ट्रेन हो रहे हैं...", "Training models...")):
                     if ml_task.startswith("Regression"):
                         res_b, err_b = train_regression_suite(
                             active_df, ml_target, ml_features, chosen_algos, ml_test_sz, max_rows=int(ml_max_rows)
@@ -2017,12 +2230,14 @@ with tab_ds:
         bundle = st.session_state.ds_trained_bundle
         if bundle is not None:
             st.success(
-                f"सर्वश्रेष्ठ मॉडल चुना गया: **{bundle['best_name']}** "
-                f"(ट्रेन किया गया डेटा: `{bundle.get('trained_rows', len(active_df)):,}` पंक्तियाँ)"
+                T(
+                    f"सर्वश्रेष्ठ मॉडल चुना गया: **{bundle['best_name']}** (ट्रेन किया गया डेटा: `{bundle.get('trained_rows', len(active_df)):,}` पंक्तियाँ)",
+                    f"Best Model Selected: **{bundle['best_name']}** (Trained on `{bundle.get('trained_rows', len(active_df)):,}` rows)",
+                )
             )
             m_left, m_right = st.columns([1.15, 1.25])
             with m_left:
-                st.markdown("**Model Leaderboard (तुलना)**")
+                st.markdown(T("**Model Leaderboard (तुलना)**", "**Model Leaderboard (Comparison)**"))
                 st.dataframe(bundle["leaderboard"], use_container_width=True)
                 if bundle.get("imp_df") is not None and not bundle["imp_df"].empty:
                     st.markdown("**Top Feature Importances**")
@@ -2064,7 +2279,7 @@ with tab_ds:
                         with st.expander("📄 Classification Report (Precision / Recall / F1)", expanded=False):
                             st.text(bundle["cls_report"])
 
-            st.markdown("#### 🎯 Live Prediction (नए इनपुट पर अनुमान निकालें)")
+            st.markdown(T("#### 🎯 Live Prediction (नए इनपुट पर अनुमान निकालें)", "#### 🎯 Live Prediction (Predict on New Input)"))
             X_ref = bundle["X_ref"]
             inp_dict = {}
             pred_cols_ui = st.columns(min(3, len(bundle["features"])))
@@ -2080,7 +2295,7 @@ with tab_ds:
                     opts_c = sorted(s_ref.dropna().astype(str).unique().tolist()) or ["Unknown"]
                     inp_dict[fc_name] = ui_b.selectbox(f"{fc_name}:", opts_c, key=f"pred_sel_{fc_name}")
 
-            if st.button("🔮 Predict करें", key="ds_do_predict_btn"):
+            if st.button(T("🔮 Predict करें", "🔮 Run Prediction"), key="ds_do_predict_btn"):
                 one_row_df = pd.DataFrame([inp_dict])
                 p_out = bundle["best_pipe"].predict(one_row_df)[0]
                 if bundle["task"] == "regression":
@@ -2105,9 +2320,9 @@ with tab_ds:
         with st.expander("🧩 Clustering & Anomaly Detection (K-Means, Agglomerative, DBSCAN, Isolation Forest)", expanded=False):
             if len(ds_nums) >= 2:
                 cl_c1, cl_c2, cl_c3 = st.columns([2, 1.2, 1])
-                cl_cols = cl_c1.multiselect("Numeric कॉलम्स:", ds_nums, default=ds_nums[: min(3, len(ds_nums))], key="ds_km_cols")
+                cl_cols = cl_c1.multiselect(T("Numeric कॉलम्स:", "Numeric Columns:"), ds_nums, default=ds_nums[: min(3, len(ds_nums))], key="ds_km_cols")
                 cl_algo = cl_c2.selectbox(
-                    "Algorithm चुनें:",
+                    T("Algorithm चुनें:", "Select Algorithm:"),
                     ["K-Means Clustering", "Agglomerative Clustering", "DBSCAN Clustering", "Isolation Forest (Anomaly)"],
                     key="ds_cl_algo",
                 )
@@ -2142,17 +2357,17 @@ with tab_ds:
                 if st.session_state.ds_cluster_res is not None:
                     st.dataframe(st.session_state.ds_cluster_res, use_container_width=True)
             else:
-                st.info("Clustering के लिए कम से कम 2 Numeric कॉलम चाहिए।")
+                st.info(T("Clustering के लिए कम से कम 2 Numeric कॉलम चाहिए।", "At least 2 numeric columns are required for clustering."))
 
     st.divider()
 
     # --- SECTION 4: DATA SCIENCE PROFILES & VISUALS ---
-    st.subheader("📑 4. सभी कॉलम्स की Data Science प्रोफ़ाइल और चार्ट्स")
+    st.subheader(T("📑 4. सभी कॉलम्स की Data Science प्रोफ़ाइल और चार्ट्स", "📑 4. All-Columns Data Science Profile & Visuals"))
     st.dataframe(build_all_columns_profile(active_df), use_container_width=True)
 
     vc_row1_l, vc_row1_r = st.columns(2)
     with vc_row1_l:
-        st.markdown("**1. सभी Numeric कॉलम्स — Correlation Matrix & Heatmap**")
+        st.markdown(T("**1. सभी Numeric कॉलम्स — Correlation Matrix & Heatmap**", "**1. All Numeric Columns — Correlation Matrix & Heatmap**"))
         if len(ds_nums) >= 2:
             corr_df = active_df[ds_nums].corr().round(3)
             st.dataframe(corr_df, use_container_width=True)
@@ -2160,35 +2375,35 @@ with tab_ds:
             st.pyplot(fig_hm, use_container_width=True)
             plt.close(fig_hm)
         else:
-            st.info("Heatmap के लिए कम से कम 2 Numeric कॉलम चाहिए।")
+            st.info(T("Heatmap के लिए कम से कम 2 Numeric कॉलम चाहिए।", "At least 2 numeric columns are required for Heatmap."))
 
     with vc_row1_r:
-        st.markdown("**2. किसी भी Numeric कॉलम का Distribution चार्ट**")
+        st.markdown(T("**2. किसी भी Numeric कॉलम का Distribution चार्ट**", "**2. Distribution Chart for Any Numeric Column**"))
         if ds_nums:
-            dist_col_sel = st.selectbox("Distribution के लिए Numeric कॉलम चुनें:", ds_nums, key="ds_dist_col_sel")
+            dist_col_sel = st.selectbox(T("Distribution के लिए Numeric कॉलम चुनें:", "Select Numeric Column for Distribution:"), ds_nums, key="ds_dist_col_sel")
             fig_dist = render_dist_fig(get_1d_series(active_df, dist_col_sel), dist_col_sel)
             st.pyplot(fig_dist, use_container_width=True)
             plt.close(fig_dist)
         else:
-            st.info("Distribution चार्ट के लिए Numeric कॉलम नहीं है।")
+            st.info(T("Distribution चार्ट के लिए Numeric कॉलम नहीं है।", "No numeric column available for distribution chart."))
 
     vc_row2_l, vc_row2_r = st.columns(2)
     with vc_row2_l:
-        st.markdown("**3. Category / Text कॉलम का वितरण चार्ट**")
+        st.markdown(T("**3. Category / Text कॉलम का वितरण चार्ट**", "**3. Category / Text Column Distribution Chart**"))
         if ds_cats:
-            cat_col_sel = st.selectbox("Category कॉलम चुनें:", ds_cats, key="ds_cat_col_sel")
+            cat_col_sel = st.selectbox(T("Category कॉलम चुनें:", "Select Category Column:"), ds_cats, key="ds_cat_col_sel")
             fig_cat = render_cat_bar_fig(get_1d_series(active_df, cat_col_sel), cat_col_sel)
             st.pyplot(fig_cat, use_container_width=True)
             plt.close(fig_cat)
         else:
-            st.info("Category कॉलम नहीं है।")
+            st.info(T("Category कॉलम नहीं है।", "No category column available."))
 
     with vc_row2_r:
-        st.markdown("**4. दो कॉलम्स का Scatter / Relationship चार्ट**")
+        st.markdown(T("**4. दो कॉलम्स का Scatter / Relationship चार्ट**", "**4. Two-Column Scatter / Relationship Chart**"))
         if len(ds_all) >= 2:
-            sc_x = st.selectbox("X-Axis कॉलम:", ds_all, index=0, key="ds_sc_x")
+            sc_x = st.selectbox(T("X-Axis कॉलम:", "X-Axis Column:"), ds_all, index=0, key="ds_sc_x")
             sc_y_def = 1 if len(ds_nums) == 0 else ds_all.index(ds_nums[0])
-            sc_y = st.selectbox("Y-Axis कॉलम:", ds_all, index=sc_y_def, key="ds_sc_y")
+            sc_y = st.selectbox(T("Y-Axis कॉलम:", "Y-Axis Column:"), ds_all, index=sc_y_def, key="ds_sc_y")
             s_sc_x = get_1d_series(active_df, sc_x)
             s_sc_y = get_1d_series(active_df, sc_y)
             sc_pair = pd.DataFrame({
@@ -2211,66 +2426,82 @@ with tab_ds:
     st.divider()
 
     # --- SECTION 4.5: AI / ML ROADMAP GENERATOR ---
-    st.subheader("🗺️ AI / ML Roadmap Generator (डेटा व लक्ष्य के अनुसार रोडमैप)")
+    st.subheader(T("🗺️ AI / ML Roadmap Generator (डेटा व लक्ष्य के अनुसार रोडमैप)", "🗺️ AI / ML Roadmap Generator (Tailored to Your Data & Goal)"))
     with st.expander("🧭 Data-Driven & Career/Project AI/ML Roadmap", expanded=False):
         rm_c1, rm_c2, rm_c3 = st.columns([1.4, 1.2, 1.0])
         with rm_c1:
             rm_goal = st.text_input(
-                "आपका मुख्य लक्ष्य / प्रोजेक्ट क्या है?",
+                T("आपका मुख्य लक्ष्य / प्रोजेक्ट क्या है?", "What is your main goal / project?"),
                 value="End-to-End Predictive Analytics & Business Decision System",
                 key="ds_rm_goal_in",
             )
         with rm_c2:
             rm_level = st.selectbox(
-                "स्तर (Level) चुनें:",
+                T("स्तर (Level) चुनें:", "Select Level:"),
                 ["Beginner to Practical", "Intermediate (Feature Eng + Tuning)", "Production / Interview Ready"],
                 key="ds_rm_level_sel",
             )
         with rm_c3:
-            rm_weeks = st.slider("समयसीमा (Weeks):", 2, 24, 6, key="ds_rm_weeks_sl")
+            rm_weeks = st.slider(T("समयसीमा (Weeks):", "Timeline (Weeks):"), 2, 24, 6, key="ds_rm_weeks_sl")
 
-        if st.button("🗺️ AI / ML Roadmap जनरेट करें", type="primary", key="ds_gen_roadmap_btn"):
-            cols_info = ", ".join([f"{c} ({str(active_df[c].dtype)})" for c in active_df.columns])
+        if st.button(T("🗺️ AI / ML Roadmap जनरेट करें", "🗺️ Generate AI / ML Roadmap"), type="primary", key="ds_gen_roadmap_btn"):
+            cols_info = ", ".join([f"{c} ({str(active_df[c].dtype)})" for c in active_df.columns[:25]])
             trained_note = ""
             if st.session_state.ds_trained_bundle is not None:
                 b_rm = st.session_state.ds_trained_bundle
-                trained_note = f"\nवर्तमान में ट्रेन किया गया Best Model: {b_rm['best_name']} (Task: {b_rm['task']}, Target: {b_rm['target']})"
+                trained_note = f"\nCurrent Best Trained Model: {b_rm['best_name']} (Task: {b_rm['task']}, Target: {b_rm['target']})"
 
-            fallback_roadmap = (
-                f"### 🗺️ AI / ML Roadmap ({rm_weeks} Weeks — {rm_level})\n"
-                f"**लक्ष्य:** {rm_goal}\n\n"
-                f"**डेटासेट संदर्भ:** `{active_df.shape[0]}` पंक्तियाँ × `{active_df.shape[1]}` कॉलम ({cols_info}){trained_note}\n\n"
-                "1. **Phase 1 — Data Audit & Cleaning:** Missing values भरें, duplicate rows हटाएं, data types सही करें, और outliers संभालें।\n"
-                "2. **Phase 2 — EDA & Feature Engineering:** Correlation, distribution, scaling (`StandardScaler`/`RobustScaler`), encoding और नए features/PCA बनाएं।\n"
-                "3. **Phase 3 — Baseline & Model Comparison:** Regression/Classification/Clustering मॉडल्स ट्रेन करें और metrics (`R2`/`MAE`/`RMSE` या `Accuracy`/`F1`) की तुलना करें।\n"
-                "4. **Phase 4 — Validation & Error Analysis:** Cross-validation, confusion matrix/residuals और feature importance जांचें।\n"
-                "5. **Phase 5 — Deployment & Reporting:** Live prediction जांचें, One-Click AI Report निकालें, और dashboard/app के रूप में प्रस्तुत करें।"
-            )
+            if is_en():
+                fallback_roadmap = (
+                    f"### 🗺️ AI / ML Roadmap ({rm_weeks} Weeks — {rm_level})\n"
+                    f"**Goal:** {rm_goal}\n\n"
+                    f"**Dataset Context:** `{active_df.shape[0]}` rows × `{active_df.shape[1]}` columns ({cols_info}){trained_note}\n\n"
+                    "1. **Phase 1 — Data Audit & Cleaning:** Impute missing values, remove duplicate rows, fix data types, and handle outliers.\n"
+                    "2. **Phase 2 — EDA & Feature Engineering:** Inspect correlations & distributions, apply scaling (`StandardScaler`/`RobustScaler`), encoding, and create engineered/PCA features.\n"
+                    "3. **Phase 3 — Baseline & Model Comparison:** Train Regression/Classification/Clustering models and compare metrics (`R2`/`MAE`/`RMSE` or `Accuracy`/`F1`).\n"
+                    "4. **Phase 4 — Validation & Error Analysis:** Run cross-validation, inspect confusion matrix/residuals, and analyze feature importances.\n"
+                    "5. **Phase 5 — Deployment & Reporting:** Test live single-row predictions, export the One-Click AI Report, and present your dashboard."
+                )
+                rm_prompt = (
+                    f"You are I'm AI Buddy — a senior AI/ML Mentor and Data Scientist.\n"
+                    f"Goal: {rm_goal}\nLevel: {rm_level}\nTimeline: {rm_weeks} Weeks\n"
+                    f"Dataset: {active_df.shape[0]} rows × {active_df.shape[1]} columns | Columns: {cols_info}{trained_note}\n\n"
+                    "Create a clear, step-by-step AI/ML Roadmap in English specifying each phase's objective, "
+                    "algorithms/techniques to use, and concrete deliverables."
+                )
+            else:
+                fallback_roadmap = (
+                    f"### 🗺️ AI / ML Roadmap ({rm_weeks} Weeks — {rm_level})\n"
+                    f"**लक्ष्य:** {rm_goal}\n\n"
+                    f"**डेटासेट संदर्भ:** `{active_df.shape[0]}` पंक्तियाँ × `{active_df.shape[1]}` कॉलम ({cols_info}){trained_note}\n\n"
+                    "1. **Phase 1 — Data Audit & Cleaning:** Missing values भरें, duplicate rows हटाएं, data types सही करें, और outliers संभालें।\n"
+                    "2. **Phase 2 — EDA & Feature Engineering:** Correlation, distribution, scaling (`StandardScaler`/`RobustScaler`), encoding और नए features/PCA बनाएं।\n"
+                    "3. **Phase 3 — Baseline & Model Comparison:** Regression/Classification/Clustering मॉडल्स ट्रेन करें और metrics (`R2`/`MAE`/`RMSE` या `Accuracy`/`F1`) की तुलना करें।\n"
+                    "4. **Phase 4 — Validation & Error Analysis:** Cross-validation, confusion matrix/residuals और feature importance जांचें।\n"
+                    "5. **Phase 5 — Deployment & Reporting:** Live prediction जांचें, One-Click AI Report निकालें, और dashboard/app के रूप में प्रस्तुत करें।"
+                )
+                rm_prompt = (
+                    f"तुम I'm AI Buddy — एक सीनियर AI/ML Mentor और Data Scientist हो।\n"
+                    f"लक्ष्य: {rm_goal}\nस्तर: {rm_level}\nसमयसीमा: {rm_weeks} Weeks\n"
+                    f"डेटासेट: {active_df.shape[0]} rows × {active_df.shape[1]} columns | Columns: {cols_info}{trained_note}\n\n"
+                    "सरल हिंदी में एक साफ़, चरणबद्ध (step-by-step) AI/ML Roadmap बनाओ जिसमें हर phase का उद्देश्य, "
+                    "इस्तेमाल होने वाले algorithms/techniques, और deliverables स्पष्ट हों।"
+                )
 
-            rm_prompt = (
-                f"तुम I'm AI Buddy — एक सीनियर AI/ML Mentor और Data Scientist हो।\n"
-                f"लक्ष्य: {rm_goal}\n"
-                f"स्तर: {rm_level}\n"
-                f"समयसीमा: {rm_weeks} Weeks\n"
-                f"डेटासेट: {active_df.shape[0]} rows × {active_df.shape[1]} columns | Columns: {cols_info}{trained_note}\n\n"
-                "सरल हिंदी में एक साफ़, चरणबद्ध (step-by-step) AI/ML Roadmap बनाओ जिसमें हर phase का उद्देश्य, "
-                "इस्तेमाल होने वाले algorithms/techniques, और deliverables स्पष्ट हों।"
-            )
-
-            with st.spinner(f"{selected_provider} से AI/ML Roadmap तैयार हो रहा है..."):
+            with st.spinner(T(f"{selected_provider} से AI/ML Roadmap तैयार हो रहा है...", f"Generating AI/ML Roadmap via {selected_provider}...")):
                 rm_ans, rm_err = call_ai_provider(ai_config, rm_prompt)
 
             if rm_ans:
                 st.session_state.ds_aiml_roadmap = rm_ans
             else:
-                st.session_state.ds_aiml_roadmap = f"{fallback_roadmap}\n\n*(AI नोट: {rm_err})*"
+                st.session_state.ds_aiml_roadmap = f"{fallback_roadmap}\n\n*(AI Note: {rm_err})*"
             log_ds_action(f"Generated AI/ML Roadmap ({rm_weeks}w, {rm_level})")
             st.rerun()
 
         if st.session_state.ds_aiml_roadmap:
             st.markdown(st.session_state.ds_aiml_roadmap)
             st.download_button(
-                "📥 AI / ML Roadmap डाउनलोड करें (.md)",
+                T("📥 AI / ML Roadmap डाउनलोड करें (.md)", "📥 Download AI / ML Roadmap (.md)"),
                 data=st.session_state.ds_aiml_roadmap.encode("utf-8"),
                 file_name="im_ai_buddy_aiml_roadmap.md",
                 mime="text/markdown",
@@ -2283,7 +2514,7 @@ with tab_ds:
     ds_left, ds_right = st.columns([1.05, 1.35])
 
     with ds_left:
-        st.subheader("🎯 Outlier जांच (IQR) व SelectKBest Ranking")
+        st.subheader(T("🎯 Outlier जांच (IQR) व SelectKBest Ranking", "🎯 Outlier Check (IQR) & SelectKBest Ranking"))
         if ds_nums:
             outlier_rows = []
             for col in ds_nums:
@@ -2296,7 +2527,7 @@ with tab_ds:
                     outlier_rows.append({
                         "Column": col,
                         "Outliers Count": cnt,
-                        "Normal Range": f"{low:,.2f} से {high:,.2f}",
+                        "Normal Range": f"{low:,.2f} to {high:,.2f}" if is_en() else f"{low:,.2f} से {high:,.2f}",
                     })
             if outlier_rows:
                 st.dataframe(pd.DataFrame(outlier_rows), use_container_width=True)
@@ -2304,7 +2535,7 @@ with tab_ds:
             if HAS_SKLEARN and len(ds_nums) >= 2:
                 skb_tgt = st.selectbox("SelectKBest Target:", ds_nums, key="ds_skb_tgt")
                 skb_feats = [c for c in ds_nums if c != skb_tgt]
-                if skb_feats and st.button("📊 Feature Score निकालें", key="ds_skb_btn"):
+                if skb_feats and st.button(T("📊 Feature Score निकालें", "📊 Compute Feature Scores"), key="ds_skb_btn"):
                     sub_skb = active_df[skb_feats + [skb_tgt]].apply(pd.to_numeric, errors="coerce").dropna()
                     if len(sub_skb) >= 10:
                         sel_k = SelectKBest(score_func=f_regression, k="all").fit(sub_skb[skb_feats], sub_skb[skb_tgt])
@@ -2315,22 +2546,27 @@ with tab_ds:
                 if st.session_state.ds_feat_rank_df is not None:
                     st.dataframe(st.session_state.ds_feat_rank_df, use_container_width=True)
         else:
-            st.info("Outlier जांच के लिए Numeric कॉलम नहीं है।")
+            st.info(T("Outlier जांच के लिए Numeric कॉलम नहीं है।", "No numeric column available for outlier detection."))
 
     with ds_right:
-        st.subheader("📋 One-Click AI Report (पूरे डेटा का उत्तर)")
-        st.caption("एक क्लिक में पूरे डेटासेट की मुख्य बातें, पैटर्न, कॉलम विश्लेषण, और ML निष्कर्ष तैयार करें।")
+        st.subheader(T("📋 One-Click AI Report (पूरे डेटा का उत्तर)", "📋 One-Click AI Report (Complete Dataset Summary)"))
+        st.caption(
+            T(
+                "एक क्लिक में पूरे डेटासेट की मुख्य बातें, पैटर्न, कॉलम विश्लेषण, और ML निष्कर्ष तैयार करें।",
+                "Generate key dataset insights, patterns, column analysis, and ML takeaways in one click.",
+            )
+        )
 
         r_btn1, r_btn2 = st.columns([1.6, 1.0])
         with r_btn1:
             gen_one_click = st.button(
-                "⚡ One-Click AI Report जनरेट करें",
+                T("⚡ One-Click AI Report जनरेट करें", "⚡ Generate One-Click AI Report"),
                 type="primary",
                 key="ds_one_click_report_btn",
                 use_container_width=True,
             )
         with r_btn2:
-            if st.button("🗑️ रिपोर्ट साफ़ करें", key="ds_clear_report_btn", use_container_width=True):
+            if st.button(T("🗑️ रिपोर्ट साफ़ करें", "🗑️ Clear Report"), key="ds_clear_report_btn", use_container_width=True):
                 st.session_state.ds_full_ai_report = None
                 st.rerun()
 
@@ -2341,33 +2577,54 @@ with tab_ds:
                 vc_top = get_1d_series(active_df, c).dropna().astype(str).value_counts().head(3)
                 if not vc_top.empty:
                     top_cats_lines.append(f"- {c}: " + ", ".join([f"{k} ({v})" for k, v in vc_top.items()]))
-            cats_block = "\n".join(top_cats_lines) if top_cats_lines else "कोई Category कॉलम नहीं"
+            cats_block = "\n".join(top_cats_lines) if top_cats_lines else T("कोई Category कॉलम नहीं", "No category columns")
 
             ml_info_line = ""
             if st.session_state.ds_trained_bundle is not None:
                 b_now = st.session_state.ds_trained_bundle
                 ml_info_line = f"\nTrained Best Model: {b_now['best_name']} (Target: {b_now['target']})"
 
-            one_click_prompt = (
-                "तुम I'm AI Buddy — एक सीनियर Data Scientist और Data Analyst हो। नीचे दिए गए "
-                "पूरे डेटासेट की जानकारी के आधार पर एक क्लिक में स्पष्ट, व्यवस्थित और उपयोगी AI Report "
-                "सरल हिंदी में दो। रिपोर्ट में ये हिस्से शामिल करो:\n"
-                "1. **Executive Overview (डेटा की सबसे ज़रूरी बातें)**\n"
-                "2. **Key Numbers & Top Categories (मुख्य आंकड़े और ट्रेंड्स)**\n"
-                "3. **Data Quality & Missing/Outlier Notes (डेटा की कमियाँ व सुधार)**\n"
-                "4. **Actionable Business & ML Recommendations (आगे क्या कदम उठाएं)**\n\n"
-                f"{local_summary}\nTop Categories:\n{cats_block}{ml_info_line}\n"
-                f"Sample Rows:\n{active_df.head(6).to_string(index=False)}"
-            )
+            cols_brief = ", ".join([f"{c} ({str(active_df[c].dtype)})" for c in active_df.columns[:25]])
+            if len(active_df.columns) > 25:
+                cols_brief += f" ... (+{len(active_df.columns) - 25} more cols)"
+            sample_compact = active_df.iloc[:4, : min(10, len(active_df.columns))].to_string(index=False)
+            if len(sample_compact) > 900:
+                sample_compact = sample_compact[:900] + "..."
 
-            with st.spinner(f"{selected_provider} से One-Click AI Report बन रही है..."):
+            if is_en():
+                one_click_prompt = (
+                    "You are I'm AI Buddy — a senior Data Scientist and Data Analyst. Based on the dataset summary below, "
+                    "write a clear, well-structured, concise AI Report in English containing these 4 sections:\n"
+                    "1. **Executive Overview**\n"
+                    "2. **Key Numbers & Top Categories**\n"
+                    "3. **Data Quality & Missing/Outlier Notes**\n"
+                    "4. **Actionable Business & ML Recommendations**\n\n"
+                    f"Columns: {cols_brief}\n"
+                    f"{local_summary[:1800]}\nTop Categories:\n{cats_block[:900]}{ml_info_line}\n"
+                    f"Sample Rows:\n{sample_compact}"
+                )
+            else:
+                one_click_prompt = (
+                    "तुम I'm AI Buddy — एक सीनियर Data Scientist और Data Analyst हो। नीचे दिए गए "
+                    "डेटासेट की जानकारी के आधार पर स्पष्ट, व्यवस्थित और संक्षिप्त AI Report सरल हिंदी में दो। "
+                    "रिपोर्ट में ये 4 हिस्से शामिल करो:\n"
+                    "1. **Executive Overview**\n"
+                    "2. **Key Numbers & Top Categories**\n"
+                    "3. **Data Quality & Missing/Outlier Notes**\n"
+                    "4. **Actionable Business & ML Recommendations**\n\n"
+                    f"Columns: {cols_brief}\n"
+                    f"{local_summary[:1800]}\nTop Categories:\n{cats_block[:900]}{ml_info_line}\n"
+                    f"Sample Rows:\n{sample_compact}"
+                )
+
+            with st.spinner(T(f"{selected_provider} से One-Click AI Report बन रही है...", f"Generating One-Click AI Report via {selected_provider}...")):
                 rep_ans, rep_err = call_ai_provider(ai_config, one_click_prompt)
 
             if rep_ans:
                 st.session_state.ds_full_ai_report = rep_ans
             else:
                 st.session_state.ds_full_ai_report = (
-                    f"### लोकल डेटा रिपोर्ट (AI उपलब्ध नहीं: {rep_err})\n\n"
+                    f"### {T('लोकल डेटा रिपोर्ट', 'Local Data Report')} (AI Unavailable: {rep_err})\n\n"
                     f"{local_summary}\n\n**Top Categories:**\n{cats_block}"
                 )
             st.rerun()
@@ -2375,9 +2632,9 @@ with tab_ds:
         if st.session_state.ds_full_ai_report:
             st.markdown(st.session_state.ds_full_ai_report)
             st.download_button(
-                "📥 AI Report डाउनलोड करें (.md)",
+                T("📥 AI Report डाउनलोड करें (.md)", "📥 Download AI Report (.md)"),
                 data=st.session_state.ds_full_ai_report.encode("utf-8"),
                 file_name="im_ai_buddy_ds_ai_report.md",
                 mime="text/markdown",
                 key="ds_dl_one_click_btn",
-            )
+)

@@ -1279,24 +1279,13 @@ if st.sidebar.button(T("🔄 मूल डेटा पर रीसेट क�
 # ==============================================================================
 # TOP HEADER & ONE-TAP LANGUAGE BAR + SHARED FILE UPLOADER
 # ==============================================================================
-hdr_col, lang_btn_col = st.columns([4.2, 1.1])
-with hdr_col:
-    st.title("🤖 I'm AI Buddy")
-    st.caption(
-        T(
-            f"सक्रिय AI इंजन: **{selected_provider}** — Complete Data Science Studio, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI।",
-            f"Active AI Engine: **{selected_provider}** — Complete Data Science Studio, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI.",
-        )
+st.title("🤖 I'm AI Buddy")
+st.caption(
+    T(
+        f"सक्रिय AI इंजन: **{selected_provider}** — Complete Data Science Studio, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI।",
+        f"Active AI Engine: **{selected_provider}** — Complete Data Science Studio, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI.",
     )
-with lang_btn_col:
-    st.write("")
-    if st.button(
-        "🌐 Switch to English" if not is_en() else "🌐 हिंदी में बदलें",
-        use_container_width=True,
-        key="top_one_tap_lang_btn",
-    ):
-        st.session_state.ui_lang = "English" if not is_en() else "Hindi"
-        st.rerun()
+)
 
 top_u1, top_u2 = st.columns([3, 1])
 with top_u1:
@@ -2637,4 +2626,4 @@ with tab_ds:
                 file_name="im_ai_buddy_ds_ai_report.md",
                 mime="text/markdown",
                 key="ds_dl_one_click_btn",
-)
+            )

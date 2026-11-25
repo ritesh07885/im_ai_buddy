@@ -1,8 +1,9 @@
 streamlit
+google-genai
 pandas
 numpy
 matplotlib
 pillow
 openpyxl
 scikit-learn
-google-genai
+duckdb

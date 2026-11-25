@@ -1552,13 +1552,20 @@ with tab_da:
         local_rep = build_local_stats_summary(da_view)
         if is_en():
             p_da = (
-                "You are I'm AI Buddy — a senior Data Analyst. Write a clear, concise summary report in English "
-                "covering key findings, patterns, and data quality notes for this dataset:\n" + local_rep
+                "You are I'm AI Buddy — a senior Data Analyst & Personal Decision Advisor. Write a clear, concise summary report in English "
+                "covering:\n"
+                "1. **Key Findings & Patterns**\n"
+                "2. **Data Quality & Cleaning Notes**\n"
+                "3. **What Matters Most for Me & What I Should Do Next (Practical Action Plan)** — clearly tell the user what is most important for their work/decisions from this result and exact next steps to take.\n\n"
+                + local_rep
             )
         else:
             p_da = (
-                "तुम I'm AI Buddy हो — एक सीनियर डेटा एनालिस्ट। इस डेटासेट की मुख्य बातें, पैटर्न, "
-                "और डेटा क्वालिटी के बारे में सरल हिंदी में संक्षिप्त रिपोर्ट दो:\n" + local_rep
+                "तुम I'm AI Buddy हो — एक सीनियर डेटा एनालिस्ट और प्रैक्टिकल एडवाइज़र। इस डेटासेट के लिए सरल हिंदी में संक्षिप्त रिपोर्ट दो जिसमें ये 3 हिस्से हों:\n"
+                "1. **मुख्य बातें और पैटर्न (Key Findings)**\n"
+                "2. **डेटा क्वालिटी और सुधार (Data Quality Notes)**\n"
+                "3. **इस डेटा से मेरे लिए क्या ज़रूरी है और मुझे आगे क्या करना चाहिए (Next Steps & Useful Takeaways)** — साफ-साफ बताओ कि इस रिज़ल्ट में मेरे काम की सबसे ज़रूरी चीज़ क्या है और अगला कदम क्या होना चाहिए।\n\n"
+                + local_rep
             )
         with st.spinner(T(f"{selected_provider} से एनालिसिस रिपोर्ट बन रही है...", f"Generating analysis report via {selected_provider}...")):
             ans, err = call_ai_provider(ai_config, p_da)
@@ -1828,13 +1835,15 @@ with tab_pbi:
         if st.button(T("🧠 AI डैशबोर्ड सुझाव लें", "🧠 Get AI Dashboard Insights"), key="pbi_rev_btn"):
             if is_en():
                 p_r = (
-                    f"You are I'm AI Buddy — a Power BI expert. Write 4 key dashboard recommendations and KPI insights "
-                    f"in English for this dataset: columns = {bi_all}, rows = {len(bi_view)}"
+                    f"You are I'm AI Buddy — a Power BI expert & Decision Advisor. Write 4 key dashboard KPI insights in English "
+                    f"and end with a dedicated section **What Matters Most & What I Should Do Next** explaining the most useful takeaway and exact next action from this dashboard: "
+                    f"columns = {bi_all}, rows = {len(bi_view)}"
                 )
             else:
                 p_r = (
                     f"तुम I'm AI Buddy — एक Power BI विशेषज्ञ हो। इस डैशबोर्ड डेटा के लिए सरल हिंदी में "
-                    f"4 मुख्य सुझाव और KPI निष्कर्ष लिखो: कॉलम = {bi_all}, पंक्तियाँ = {len(bi_view)}"
+                    f"4 मुख्य KPI निष्कर्ष लिखो और अंत में **इस डैशबोर्ड से मेरे लिए क्या ज़रूरी है और आगे क्या करना चाहिए** शीर्षक से मेरे काम की सबसे महत्वपूर्ण बात और अगला प्रैक्टिकल कदम बताओ: "
+                    f"कॉलम = {bi_all}, पंक्तियाँ = {len(bi_view)}"
                 )
             with st.spinner(T(f"{selected_provider} से BI रिव्यू तैयार हो रहा है...", f"Generating BI review via {selected_provider}...")):
                 rt, re_msg = call_ai_provider(ai_config, p_r)
@@ -2582,25 +2591,27 @@ with tab_ds:
 
             if is_en():
                 one_click_prompt = (
-                    "You are I'm AI Buddy — a senior Data Scientist and Data Analyst. Based on the dataset summary below, "
-                    "write a clear, well-structured, concise AI Report in English containing these 4 sections:\n"
+                    "You are I'm AI Buddy — a senior Data Scientist, Analyst, and Practical Decision Advisor. Based on the dataset summary below, "
+                    "write a clear, well-structured, concise AI Report in English containing these 5 sections:\n"
                     "1. **Executive Overview**\n"
                     "2. **Key Numbers & Top Categories**\n"
                     "3. **Data Quality & Missing/Outlier Notes**\n"
-                    "4. **Actionable Business & ML Recommendations**\n\n"
+                    "4. **ML & Analytical Insights**\n"
+                    "5. **What Matters Most for Me & What I Should Do Next (My Action Plan)** — clearly highlight the most important findings for the user's real-world decisions/work, what is most useful in this result, and exact step-by-step actions to take next.\n\n"
                     f"Columns: {cols_brief}\n"
                     f"{local_summary[:1800]}\nTop Categories:\n{cats_block[:900]}{ml_info_line}\n"
                     f"Sample Rows:\n{sample_compact}"
                 )
             else:
                 one_click_prompt = (
-                    "तुम I'm AI Buddy — एक सीनियर Data Scientist और Data Analyst हो। नीचे दिए गए "
+                    "तुम I'm AI Buddy — एक सीनियर Data Scientist, Analyst और प्रैक्टिकल Decision Advisor हो। नीचे दिए गए "
                     "डेटासेट की जानकारी के आधार पर स्पष्ट, व्यवस्थित और संक्षिप्त AI Report सरल हिंदी में दो। "
-                    "रिपोर्ट में ये 4 हिस्से शामिल करो:\n"
-                    "1. **Executive Overview**\n"
-                    "2. **Key Numbers & Top Categories**\n"
-                    "3. **Data Quality & Missing/Outlier Notes**\n"
-                    "4. **Actionable Business & ML Recommendations**\n\n"
+                    "रिपोर्ट में ये 5 हिस्से शामिल करो:\n"
+                    "1. **Executive Overview (डेटा का सार)**\n"
+                    "2. **Key Numbers & Top Categories (मुख्य आंकड़े)**\n"
+                    "3. **Data Quality & Missing/Outlier Notes (डेटा क्वालिटी व सुधार)**\n"
+                    "4. **ML & Analytical Insights (मॉडल व ट्रेंड निष्कर्ष)**\n"
+                    "5. **इस डेटा से मेरे लिए क्या ज़रूरी है और मुझे आगे क्या करना चाहिए (What Matters Most & Next Steps)** — रिज़ल्ट के बाद साफ-साफ बताओ कि मेरे काम की सबसे ज़रूरी चीज़ क्या है, किस चीज़ पर तुरंत ध्यान देना है, और मेरा अगला कदम (Action Plan) क्या होना चाहिए।\n\n"
                     f"Columns: {cols_brief}\n"
                     f"{local_summary[:1800]}\nTop Categories:\n{cats_block[:900]}{ml_info_line}\n"
                     f"Sample Rows:\n{sample_compact}"
@@ -2626,4 +2637,4 @@ with tab_ds:
                 file_name="im_ai_buddy_ds_ai_report.md",
                 mime="text/markdown",
                 key="ds_dl_one_click_btn",
-            )
+        )

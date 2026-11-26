@@ -236,6 +236,28 @@ if "ds_feat_rank_df" not in st.session_state:
 if "ds_aiml_roadmap" not in st.session_state:
     st.session_state.ds_aiml_roadmap = None
 
+# Tab 5 (Deep Learning) state
+if "dl_mlp_bundle" not in st.session_state:
+    st.session_state.dl_mlp_bundle = None
+if "dl_seq_res" not in st.session_state:
+    st.session_state.dl_seq_res = None
+if "dl_ae_res" not in st.session_state:
+    st.session_state.dl_ae_res = None
+if "dl_ai_report" not in st.session_state:
+    st.session_state.dl_ai_report = None
+
+# Tab 6 (NLP & Time-Series) state
+if "nlp_sent_df" not in st.session_state:
+    st.session_state.nlp_sent_df = None
+if "nlp_kw_df" not in st.session_state:
+    st.session_state.nlp_kw_df = None
+if "nlp_clf_bundle" not in st.session_state:
+    st.session_state.nlp_clf_bundle = None
+if "ts_fc_df" not in st.session_state:
+    st.session_state.ts_fc_df = None
+if "nlp_ai_report" not in st.session_state:
+    st.session_state.nlp_ai_report = None
+
 
 # ==============================================================================
 # HELPER FUNCTIONS
@@ -1273,6 +1295,15 @@ if st.sidebar.button(T("🔄 मूल डेटा पर रीसेट क�
         st.session_state.ds_trained_bundle = None
         st.session_state.ds_cluster_res = None
         st.session_state.ds_feat_rank_df = None
+        st.session_state.dl_mlp_bundle = None
+        st.session_state.dl_seq_res = None
+        st.session_state.dl_ae_res = None
+        st.session_state.dl_ai_report = None
+        st.session_state.nlp_sent_df = None
+        st.session_state.nlp_kw_df = None
+        st.session_state.nlp_clf_bundle = None
+        st.session_state.ts_fc_df = None
+        st.session_state.nlp_ai_report = None
         st.session_state.ds_action_log = []
         st.rerun()
 
@@ -1343,11 +1374,13 @@ with top_u2:
 # ==============================================================================
 # TOP NAVIGATION TABS
 # ==============================================================================
-tab_da, tab_sql, tab_pbi, tab_ds = st.tabs([
+tab_da, tab_sql, tab_pbi, tab_ds, tab_dl, tab_nlp = st.tabs([
     "📊 Data Analysis",
     "🗄️ SQL Studio",
     "📈 Power BI AI",
     "🧠 Data Science & Gen AI",
+    "🧬 Deep Learning Lab",
+    "💬 NLP & Forecasting",
 ])
 
 # ------------------------------------------------------------------------------
@@ -1857,6 +1890,16 @@ with tab_pbi:
             )
         if st.session_state.bi_ai_review:
             st.markdown(st.session_state.bi_ai_review)
+            pbi_rep_md = "# I'm AI Buddy — Power BI AI Report\n\n" + st.session_state.bi_ai_review
+            if st.session_state.bi_dax_code:
+                pbi_rep_md += "\n\n## DAX Formula\n" + st.session_state.bi_dax_code
+            st.download_button(
+                T("📥 Power BI AI Report डाउनलोड करें (.md)", "📥 Download Power BI AI Report (.md)"),
+                data=pbi_rep_md.encode("utf-8"),
+                file_name="im_ai_buddy_powerbi_ai_report.md",
+                mime="text/markdown",
+                key="pbi_dl_report_btn",
+            )
 
 # ------------------------------------------------------------------------------
 # TAB 4: COMPLETE DATA SCIENCE STUDIO + ALL FUNCTIONS BOX + ONE-CLICK AI REPORT
@@ -2637,4 +2680,625 @@ with tab_ds:
                 file_name="im_ai_buddy_ds_ai_report.md",
                 mime="text/markdown",
                 key="ds_dl_one_click_btn",
+            )
+
+
+# ------------------------------------------------------------------------------
+# TAB 5: DEEP LEARNING LAB (NEURAL NETWORKS, 1D-CNN/RNN SEQUENCE & AUTOENCODER)
+# ------------------------------------------------------------------------------
+with tab_dl:
+    st.header(
+        T(
+            "🧬 Deep Learning Lab (Deep MLP Neural Network, 1D-CNN / Sequence Net & Autoencoder)",
+            "🧬 Deep Learning Lab (Deep MLP Neural Network, 1D-CNN / Sequence Net & Autoencoder)",
         )
+    )
+    st.caption(
+        T(
+            "यहाँ Deep Learning के सभी मुख्य आर्किटेक्चर (Multi-Layer Neural Network, 1D-CNN/RNN-style Sliding Sequence Neural Net, और Neural Autoencoder Anomaly Detector) दिए गए हैं।",
+            "Includes core Deep Learning architectures: Multi-Layer Neural Network, 1D-CNN/RNN-style Sliding Sequence Neural Net, and Neural Autoencoder Anomaly Detector.",
+        )
+    )
+
+    dl_nums = active_df.select_dtypes(include="number").columns.tolist()
+    dl_cats = active_df.select_dtypes(exclude="number").columns.tolist()
+    dl_all = active_df.columns.tolist()
+
+    # --- DL MODULE 1: CUSTOM DEEP NEURAL NETWORK (MLP BUILDER) ---
+    st.subheader(T("1. 🧠 Custom Deep Neural Network Builder (Multi-Layer Perceptron)", "1. 🧠 Custom Deep Neural Network Builder (Multi-Layer Perceptron)"))
+    if not HAS_SKLEARN:
+        st.warning(T("Deep Learning Lab के लिए `scikit-learn` आवश्यक है।", "`scikit-learn` is required for Deep Learning Lab."))
+    else:
+        with st.expander(T("⚙️ Neural Network Architecture & Hyperparameters कॉन्फ़िगर करें", "⚙️ Configure Neural Network Architecture & Hyperparameters"), expanded=True):
+            dn1, dn2, dn3, dn4 = st.columns([1.2, 1.2, 1.5, 1.1])
+            with dn1:
+                dl_task = st.selectbox(T("Task चुनें:", "Select Task:"), ["Regression (Numeric)", "Classification (Category)"], key="dl_nn_task")
+            with dn2:
+                if dl_task.startswith("Regression"):
+                    dl_tgt_opts = dl_nums if dl_nums else dl_all
+                else:
+                    dl_tgt_opts = [c for c in dl_all if 1 < active_df[c].nunique(dropna=True) <= 25] or dl_all
+                dl_target = st.selectbox(T("Target कॉलम:", "Target Column:"), dl_tgt_opts, key="dl_nn_target")
+            with dn3:
+                dl_safe_feats = [
+                    c for c in dl_all
+                    if c != dl_target and not (not pd.api.types.is_numeric_dtype(active_df[c]) and active_df[c].nunique(dropna=True) > 200)
+                ]
+                dl_feat_cands = dl_safe_feats if dl_safe_feats else [c for c in dl_all if c != dl_target]
+                dl_features = st.multiselect(
+                    T("Input Features (X):", "Input Features (X):"),
+                    dl_feat_cands,
+                    default=dl_feat_cands[: min(6, len(dl_feat_cands))],
+                    key="dl_nn_feats",
+                )
+            with dn4:
+                dl_arch = st.selectbox(
+                    T("Hidden Layers आर्किटेक्चर:", "Hidden Layers Architecture:"),
+                    ["(64, 32)", "(128, 64)", "(128, 64, 32)", "(256, 128, 64)", "(64, 64, 32, 16)"],
+                    index=2,
+                    key="dl_nn_arch",
+                )
+
+            hp1, hp2, hp3, hp4 = st.columns(4)
+            dl_act = hp1.selectbox("Activation Function:", ["relu", "tanh", "logistic"], index=0, key="dl_nn_act")
+            dl_solver = hp2.selectbox("Optimizer:", ["adam", "sgd", "lbfgs"], index=0, key="dl_nn_opt")
+            dl_lr = hp3.select_slider("Learning Rate:", options=[0.0005, 0.001, 0.005, 0.01, 0.05], value=0.001, key="dl_nn_lr")
+            dl_epochs = hp4.slider("Max Epochs (Iterations):", 100, 1000, 350, 50, key="dl_nn_epochs")
+
+            if st.button(T("🚀 Deep Neural Network ट्रेन करें", "🚀 Train Deep Neural Network"), type="primary", key="dl_train_nn_btn"):
+                if not dl_features:
+                    st.error(T("कम से कम 1 Feature चुनें।", "Please select at least 1 feature."))
+                else:
+                    layers_tuple = tuple(int(x.strip()) for x in dl_arch.strip("()").split(",") if x.strip())
+                    work_dl = prepare_ml_subset(active_df, dl_features + [dl_target], max_rows=30000)
+                    with st.spinner(T("Deep Neural Network ट्रेन हो रहा है...", "Training Deep Neural Network...")):
+                        if dl_task.startswith("Regression"):
+                            work_dl[dl_target] = pd.to_numeric(work_dl[dl_target], errors="coerce")
+                            work_dl = work_dl.dropna(subset=[dl_target])
+                            if len(work_dl) < 8:
+                                st.error(T("कम से कम 8 वैध पंक्तियाँ चाहिए।", "At least 8 valid rows are required."))
+                            else:
+                                X_d = work_dl[dl_features]
+                                y_d = work_dl[dl_target].astype(np.float32)
+                                X_tr, X_te, y_tr, y_te = train_test_split(X_d, y_d, test_size=0.25, random_state=42)
+                                mlp_m = MLPRegressor(
+                                    hidden_layer_sizes=layers_tuple,
+                                    activation=dl_act,
+                                    solver=dl_solver,
+                                    learning_rate_init=dl_lr,
+                                    max_iter=dl_epochs,
+                                    random_state=42,
+                                )
+                                pipe_dl = Pipeline([("prep", build_preprocessor(X_d)), ("model", mlp_m)])
+                                pipe_dl.fit(X_tr, y_tr)
+                                preds_d = pipe_dl.predict(X_te)
+                                st.session_state.dl_mlp_bundle = {
+                                    "task": "regression",
+                                    "arch": dl_arch,
+                                    "act": dl_act,
+                                    "opt": dl_solver,
+                                    "target": dl_target,
+                                    "features": dl_features,
+                                    "pipe": pipe_dl,
+                                    "loss_curve": getattr(pipe_dl.named_steps["model"], "loss_curve_", []),
+                                    "metrics": {
+                                        "R2 Score": round(float(r2_score(y_te, preds_d)), 4),
+                                        "MAE": round(float(mean_absolute_error(y_te, preds_d)), 2),
+                                        "RMSE": round(float(np.sqrt(mean_squared_error(y_te, preds_d))), 2),
+                                    },
+                                    "y_test": y_te.reset_index(drop=True),
+                                    "y_pred": pd.Series(preds_d),
+                                    "X_ref": X_d,
+                                }
+                                log_ds_action(f"Deep Learning MLP {dl_arch} trained on '{dl_target}'")
+                        else:
+                            work_dl[dl_target] = work_dl[dl_target].astype(str).str.strip()
+                            work_dl = work_dl[work_dl[dl_target] != ""]
+                            vc_d = work_dl[dl_target].value_counts()
+                            work_dl = work_dl[work_dl[dl_target].isin(vc_d[vc_d >= 2].index)]
+                            if len(work_dl) < 8 or work_dl[dl_target].nunique() < 2:
+                                st.error(T("कम से कम 2 Classes और 8 पंक्तियाँ चाहिए।", "At least 2 classes and 8 rows are required."))
+                            else:
+                                X_d = work_dl[dl_features]
+                                y_d = work_dl[dl_target]
+                                strat_d = y_d if y_d.value_counts().min() >= 2 else None
+                                X_tr, X_te, y_tr, y_te = train_test_split(X_d, y_d, test_size=0.25, random_state=42, stratify=strat_d)
+                                mlp_c = MLPClassifier(
+                                    hidden_layer_sizes=layers_tuple,
+                                    activation=dl_act,
+                                    solver=dl_solver,
+                                    learning_rate_init=dl_lr,
+                                    max_iter=dl_epochs,
+                                    random_state=42,
+                                )
+                                pipe_dl = Pipeline([("prep", build_preprocessor(X_d)), ("model", mlp_c)])
+                                pipe_dl.fit(X_tr, y_tr)
+                                preds_d = pipe_dl.predict(X_te)
+                                st.session_state.dl_mlp_bundle = {
+                                    "task": "classification",
+                                    "arch": dl_arch,
+                                    "act": dl_act,
+                                    "opt": dl_solver,
+                                    "target": dl_target,
+                                    "features": dl_features,
+                                    "pipe": pipe_dl,
+                                    "loss_curve": getattr(pipe_dl.named_steps["model"], "loss_curve_", []),
+                                    "metrics": {
+                                        "Accuracy %": f"{accuracy_score(y_te, preds_d) * 100:.2f}%",
+                                        "Precision": round(float(precision_score(y_te, preds_d, average="weighted", zero_division=0)), 4),
+                                        "Recall": round(float(recall_score(y_te, preds_d, average="weighted", zero_division=0)), 4),
+                                        "F1 Score": round(float(f1_score(y_te, preds_d, average="weighted", zero_division=0)), 4),
+                                    },
+                                    "X_ref": X_d,
+                                }
+                                log_ds_action(f"Deep Learning MLP {dl_arch} Classifier trained on '{dl_target}'")
+
+            dl_b = st.session_state.dl_mlp_bundle
+            if dl_b is not None:
+                st.success(f"Neural Network `{dl_b['arch']}` ({dl_b['act']}, {dl_b['opt']}) — Target: `{dl_b['target']}`")
+                m_cols_dl = st.columns(len(dl_b["metrics"]))
+                for idx_m, (mk, mv) in enumerate(dl_b["metrics"].items()):
+                    m_cols_dl[idx_m].metric(mk, str(mv))
+
+                lc_col, pred_col_dl = st.columns([1.15, 1.25])
+                with lc_col:
+                    loss_vals = dl_b.get("loss_curve") or []
+                    if len(loss_vals) > 1:
+                        fig_lc, ax_lc = plt.subplots(figsize=(5.8, 3.4), dpi=120)
+                        ax_lc.plot(range(1, len(loss_vals) + 1), loss_vals, color="#7C3AED", linewidth=2.0)
+                        ax_lc.set_title("Neural Network Training Loss Curve", fontsize=10.5, fontweight="bold")
+                        ax_lc.set_xlabel("Epoch / Iteration")
+                        ax_lc.set_ylabel("Training Loss")
+                        ax_lc.grid(True, linestyle="--", alpha=0.3)
+                        plt.tight_layout()
+                        st.pyplot(fig_lc, use_container_width=True)
+                        plt.close(fig_lc)
+                    else:
+                        st.info(T("Loss curve केवल iterative solvers (adam/sgd) पर उपलब्ध है।", "Loss curve is available for iterative solvers (adam/sgd)."))
+
+                with pred_col_dl:
+                    st.markdown(T("**🎯 Neural Network Live Prediction**", "**🎯 Neural Network Live Prediction**"))
+                    X_dl_ref = dl_b["X_ref"]
+                    dl_inp = {}
+                    sub_ui_dl = st.columns(2)
+                    for idx_f, fc_n in enumerate(dl_b["features"]):
+                        box_u = sub_ui_dl[idx_f % 2]
+                        s_r = X_dl_ref[fc_n]
+                        if pd.api.types.is_numeric_dtype(s_r):
+                            mv_def = float(pd.to_numeric(s_r, errors="coerce").median())
+                            dl_inp[fc_n] = box_u.number_input(f"{fc_n}:", value=0.0 if np.isnan(mv_def) else mv_def, key=f"dl_p_{fc_n}")
+                        else:
+                            opts_dl = sorted(s_r.dropna().astype(str).unique().tolist()) or ["Unknown"]
+                            dl_inp[fc_n] = box_u.selectbox(f"{fc_n}:", opts_dl, key=f"dl_s_{fc_n}")
+
+                    if st.button(T("⚡ Neural Predict करें", "⚡ Run Neural Prediction"), key="dl_live_pred_btn"):
+                        out_dl = dl_b["pipe"].predict(pd.DataFrame([dl_inp]))[0]
+                        st.metric(f"Neural Prediction ({dl_b['target']})", f"{float(out_dl):,.2f}" if dl_b["task"] == "regression" else str(out_dl))
+
+    st.divider()
+
+    # --- DL MODULE 2: 1D-CNN / RNN-STYLE SLIDING WINDOW SEQUENCE NEURAL NETWORK ---
+    st.subheader(T("2. 🌊 1D-CNN / Sequence Sliding-Window Neural Network (Sequential Pattern Prediction)", "2. 🌊 1D-CNN / Sequence Sliding-Window Neural Network (Sequential Pattern Prediction)"))
+    if HAS_SKLEARN and dl_nums:
+        with st.expander(T("📈 Sequential / Lag-Window Neural Network चलाएं", "📈 Run Sequential / Lag-Window Neural Network"), expanded=False):
+            sq1, sq2, sq3 = st.columns([1.4, 1.0, 1.0])
+            seq_col = sq1.selectbox(T("Numeric Sequence कॉलम:", "Numeric Sequence Column:"), dl_nums, key="dl_seq_col")
+            win_sz = sq2.slider(T("Window / Kernel Size (पिछले Steps):", "Window / Kernel Size (Past Steps):"), 2, 15, 5, key="dl_seq_win")
+            fut_steps = sq3.slider(T("अगले कितने Steps Predict करें:", "Future Steps to Predict:"), 3, 30, 10, key="dl_seq_fut")
+
+            if st.button(T("🌊 Sequence Neural Net चलाएं", "🌊 Run Sequence Neural Net"), key="dl_seq_btn"):
+                s_seq = pd.to_numeric(get_1d_series(active_df, seq_col), errors="coerce").dropna().to_numpy()
+                if len(s_seq) <= win_sz + 5:
+                    st.error(T("Sequence बहुत छोटी है; Window Size कम करें या बड़ा डेटा दें।", "Sequence is too short; reduce Window Size or provide more rows."))
+                else:
+                    X_w, y_w = [], []
+                    for i in range(len(s_seq) - win_sz):
+                        X_w.append(s_seq[i : i + win_sz])
+                        y_w.append(s_seq[i + win_sz])
+                    X_w = np.array(X_w, dtype=np.float32)
+                    y_w = np.array(y_w, dtype=np.float32)
+
+                    sc_seq = StandardScaler()
+                    X_w_sc = sc_seq.fit_transform(X_w)
+                    seq_nn = MLPRegressor(hidden_layer_sizes=(64, 32), activation="relu", max_iter=400, random_state=42)
+                    seq_nn.fit(X_w_sc, y_w)
+                    in_sample_pred = seq_nn.predict(X_w_sc)
+                    seq_r2 = float(r2_score(y_w, in_sample_pred))
+
+                    curr_win = s_seq[-win_sz:].copy().astype(np.float32)
+                    future_preds = []
+                    for _ in range(fut_steps):
+                        nxt_v = float(seq_nn.predict(sc_seq.transform(curr_win.reshape(1, -1)))[0])
+                        future_preds.append(nxt_v)
+                        curr_win = np.append(curr_win[1:], nxt_v)
+
+                    st.session_state.dl_seq_res = {
+                        "col": seq_col,
+                        "win": win_sz,
+                        "r2": round(seq_r2, 4),
+                        "history": s_seq[-min(60, len(s_seq)) :],
+                        "future": future_preds,
+                    }
+                    log_ds_action(f"Sequence Neural Net trained on '{seq_col}' (window={win_sz}, steps={fut_steps})")
+
+            if st.session_state.dl_seq_res is not None:
+                sr = st.session_state.dl_seq_res
+                st.metric(f"Sequence Neural Fit (R2) — {sr['col']}", f"{sr['r2']:.4f}")
+                fig_sq, ax_sq = plt.subplots(figsize=(7.0, 3.6), dpi=120)
+                hist_y = sr["history"]
+                fut_y = sr["future"]
+                ax_sq.plot(range(len(hist_y)), hist_y, label="Historical Sequence", color="#2563EB", linewidth=2)
+                ax_sq.plot(range(len(hist_y), len(hist_y) + len(fut_y)), fut_y, label="Neural Forecast", color="#DC2626", marker="o", linestyle="--", linewidth=2)
+                ax_sq.set_title(f"1D-Sliding Window Neural Forecast — {sr['col']}", fontsize=10.5, fontweight="bold")
+                ax_sq.legend()
+                ax_sq.grid(True, linestyle="--", alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig_sq, use_container_width=True)
+                plt.close(fig_sq)
+                fc_tbl_dl = pd.DataFrame({"Future_Step": range(1, len(fut_y) + 1), f"Predicted_{sr['col']}": np.round(fut_y, 2)})
+                st.dataframe(fc_tbl_dl, use_container_width=True)
+    else:
+        st.info(T("Sequence Neural Net के लिए Numeric कॉलम आवश्यक है।", "At least 1 numeric column is required for Sequence Neural Net."))
+
+    st.divider()
+
+    # --- DL MODULE 3: NEURAL AUTOENCODER ANOMALY DETECTOR ---
+    st.subheader(T("3. 🛡️ Neural Autoencoder Anomaly Detector (Reconstruction Error)", "3. 🛡️ Neural Autoencoder Anomaly Detector (Reconstruction Error)"))
+    if HAS_SKLEARN and len(dl_nums) >= 2:
+        with st.expander(T("🔍 Autoencoder Bottleneck से Unusual / Fraud Rows खोजें", "🔍 Detect Unusual / Fraud Rows via Autoencoder Bottleneck"), expanded=False):
+            ae_c1, ae_c2, ae_c3 = st.columns([2, 1, 1])
+            ae_cols = ae_c1.multiselect(T("Numeric Features चुनें:", "Select Numeric Features:"), dl_nums, default=dl_nums[: min(5, len(dl_nums))], key="dl_ae_cols")
+            ae_latent = ae_c2.slider(T("Bottleneck Neurons:", "Bottleneck Neurons:"), 1, max(1, len(ae_cols) - 1 if len(ae_cols) > 1 else 1), 1, key="dl_ae_lat")
+            ae_top_k = ae_c3.slider(T("Top Anomalies दिखाएं:", "Top Anomalies to Show:"), 5, 30, 10, key="dl_ae_topk")
+
+            if st.button(T("🛡️ Neural Autoencoder चलाएं", "🛡️ Run Neural Autoencoder"), key="dl_ae_btn") and len(ae_cols) >= 2:
+                ae_sub = active_df[ae_cols].apply(pd.to_numeric, errors="coerce")
+                valid_ae = ae_sub.dropna()
+                if len(valid_ae) > 20000:
+                    valid_ae = valid_ae.sample(n=20000, random_state=42)
+                if len(valid_ae) >= 10:
+                    sc_ae = StandardScaler()
+                    X_ae_sc = sc_ae.fit_transform(valid_ae)
+                    mid_dim = max(2, len(ae_cols) * 2)
+                    ae_net = MLPRegressor(
+                        hidden_layer_sizes=(mid_dim, ae_latent, mid_dim),
+                        activation="tanh",
+                        max_iter=400,
+                        random_state=42,
+                    )
+                    ae_net.fit(X_ae_sc, X_ae_sc)
+                    recon = ae_net.predict(X_ae_sc)
+                    mse_err = np.mean((X_ae_sc - recon) ** 2, axis=1)
+                    out_ae = active_df.loc[valid_ae.index].copy()
+                    out_ae["Autoencoder_Anomaly_Score"] = np.round(mse_err, 4)
+                    st.session_state.dl_ae_res = out_ae.sort_values("Autoencoder_Anomaly_Score", ascending=False).head(ae_top_k)
+                    log_ds_action(f"Neural Autoencoder detected top {ae_top_k} anomalies on {ae_cols}")
+
+            if st.session_state.dl_ae_res is not None:
+                st.dataframe(st.session_state.dl_ae_res, use_container_width=True)
+    else:
+        st.info(T("Neural Autoencoder के लिए कम से कम 2 Numeric कॉलम चाहिए।", "At least 2 numeric columns are required for Neural Autoencoder."))
+
+    st.divider()
+    if st.button(T("🤖 Deep Learning AI Report जनरेट करें", "🤖 Generate Deep Learning AI Report"), key="dl_ai_rep_btn"):
+        dl_ctx_lines = [f"Dataset: {active_df.shape[0]} rows × {active_df.shape[1]} columns"]
+        if st.session_state.dl_mlp_bundle:
+            b_dl = st.session_state.dl_mlp_bundle
+            dl_ctx_lines.append(f"Trained Neural Network: {b_dl['arch']} ({b_dl['act']}, {b_dl['opt']}) on target '{b_dl['target']}' -> Metrics: {b_dl['metrics']}")
+        if st.session_state.dl_seq_res:
+            s_dl = st.session_state.dl_seq_res
+            dl_ctx_lines.append(f"Sequence Neural Net on '{s_dl['col']}' (window={s_dl['win']}, R2={s_dl['r2']}) -> Next forecast values: {np.round(s_dl['future'][:5], 2).tolist()}")
+        if st.session_state.dl_ae_res is not None:
+            dl_ctx_lines.append(f"Autoencoder Top Anomaly Score: {st.session_state.dl_ae_res['Autoencoder_Anomaly_Score'].iloc[0]}")
+
+        dl_summary_txt = "\n".join(dl_ctx_lines)
+        if is_en():
+            p_dl = (
+                "You are I'm AI Buddy — a senior Deep Learning Engineer & Practical Advisor. Based on these Deep Learning results, "
+                "write a clear summary in English with:\n"
+                "1. **Neural Model & Architecture Insights**\n"
+                "2. **What Matters Most for Me & What I Should Do Next (Practical Action Plan)** — clearly tell the user what is most useful here and what action to take next.\n\n"
+                + dl_summary_txt
+            )
+        else:
+            p_dl = (
+                "तुम I'm AI Buddy — एक सीनियर Deep Learning Engineer और प्रैक्टिकल एडवाइज़र हो। नीचे दिए गए Deep Learning रिज़ल्ट के आधार पर सरल हिंदी में रिपोर्ट लिखो:\n"
+                "1. **Neural Model व आर्किटेक्चर के मुख्य निष्कर्ष**\n"
+                "2. **इस रिज़ल्ट से मेरे लिए क्या ज़रूरी है और मुझे आगे क्या करना चाहिए (Next Steps & Useful Takeaways)** — साफ-साफ बताओ कि मेरे काम की सबसे ज़रूरी बात क्या है और अगला कदम क्या होना चाहिए।\n\n"
+                + dl_summary_txt
+            )
+        with st.spinner(T(f"{selected_provider} से Deep Learning रिपोर्ट बन रही है...", f"Generating Deep Learning report via {selected_provider}...")):
+            dl_ans, dl_err = call_ai_provider(ai_config, p_dl)
+        st.session_state.dl_ai_report = dl_ans if dl_ans else f"### Deep Learning Summary\n{dl_summary_txt}\n\n*(AI Note: {dl_err})*"
+
+    if st.session_state.dl_ai_report:
+        st.markdown(st.session_state.dl_ai_report)
+        st.download_button(
+            T("📥 Deep Learning AI Report डाउनलोड करें (.md)", "📥 Download Deep Learning AI Report (.md)"),
+            data=st.session_state.dl_ai_report.encode("utf-8"),
+            file_name="im_ai_buddy_deep_learning_report.md",
+            mime="text/markdown",
+            key="dl_dl_report_btn",
+        )
+
+
+# ------------------------------------------------------------------------------
+# TAB 6: NLP & TIME-SERIES FORECASTING (NON-DEEP-LEARNING / CLASSICAL & TEXT)
+# ------------------------------------------------------------------------------
+with tab_nlp:
+    st.header(
+        T(
+            "💬 NLP Studio & Time-Series Forecasting (Text Analytics, Sentiment & Trend Models)",
+            "💬 NLP Studio & Time-Series Forecasting (Text Analytics, Sentiment & Trend Models)",
+        )
+    )
+    st.caption(
+        T(
+            "यहाँ Deep Learning से अलग वाले मॉडल्स और टूल्स हैं: Text/Reviews पर NLP (Sentiment Analysis, TF-IDF Keywords, Text Classification) और Date/Numeric डेटा पर Time-Series Forecasting।",
+            "Contains non-deep-learning text & forecasting tools: NLP on Text/Reviews (Sentiment Analysis, TF-IDF Keywords, Text Classification) and Time-Series Forecasting.",
+        )
+    )
+
+    nlp_cats = active_df.select_dtypes(exclude="number").columns.tolist()
+    nlp_nums = active_df.select_dtypes(include="number").columns.tolist()
+    nlp_all = active_df.columns.tolist()
+
+    # --- NLP MODULE 1: SENTIMENT ANALYSIS & TF-IDF KEYWORDS ---
+    st.subheader(T("1. 📝 NLP Text Analyzer (Sentiment Analysis & TF-IDF Top Keywords)", "1. 📝 NLP Text Analyzer (Sentiment Analysis & TF-IDF Top Keywords)"))
+    if nlp_cats:
+        n_c1, n_c2, n_c3 = st.columns([1.5, 1.0, 1.0])
+        txt_col_sel = n_c1.selectbox(T("Text / Review कॉलम चुनें:", "Select Text / Review Column:"), nlp_cats, key="nlp_txt_col")
+        top_kw_n = n_c2.slider(T("Top Keywords संख्या:", "Top Keywords Count:"), 5, 25, 12, key="nlp_kw_n")
+        ngram_opt = n_c3.selectbox("N-Gram Range:", ["Unigrams (1 word)", "Unigrams + Bigrams (1-2 words)"], key="nlp_ngram_sel")
+
+        if st.button(T("🔍 NLP Analysis चलाएं (Sentiment + Keywords)", "🔍 Run NLP Analysis (Sentiment + Keywords)"), type="primary", key="nlp_run_btn"):
+            s_txt = get_1d_series(active_df, txt_col_sel).fillna("").astype(str)
+            pos_words = {
+                "good", "great", "excellent", "amazing", "awesome", "love", "best", "happy", "fast",
+                "nice", "perfect", "helpful", "super", "fantastic", "clean", "worth", "profit", "high", "success",
+            }
+            neg_words = {
+                "bad", "poor", "worst", "terrible", "slow", "hate", "issue", "problem", "broken",
+                "late", "waste", "disappointed", "wrong", "fail", "error", "loss", "low", "refund", "cancel",
+            }
+
+            sent_labels = []
+            sent_scores = []
+            for line_t in s_txt:
+                tokens = re.findall(r"[a-zA-Z]{2,}", line_t.lower())
+                p_cnt = sum(1 for w in tokens if w in pos_words)
+                n_cnt = sum(1 for w in tokens if w in neg_words)
+                sc_val = p_cnt - n_cnt
+                sent_scores.append(sc_val)
+                if sc_val > 0:
+                    sent_labels.append("Positive")
+                elif sc_val < 0:
+                    sent_labels.append("Negative")
+                else:
+                    sent_labels.append("Neutral")
+
+            res_sent = pd.DataFrame({
+                txt_col_sel: s_txt,
+                "Sentiment": sent_labels,
+                "Score": sent_scores,
+                "Word_Count": s_txt.apply(lambda x: len(x.split())),
+            })
+            st.session_state.nlp_sent_df = res_sent
+
+            if HAS_SKLEARN:
+                from sklearn.feature_extraction.text import TfidfVectorizer
+                non_empty_docs = [t for t in s_txt.tolist() if len(t.strip()) > 1]
+                if len(non_empty_docs) >= 2:
+                    ng_r = (1, 2) if ngram_opt.startswith("Unigrams +") else (1, 1)
+                    vec = TfidfVectorizer(stop_words="english", max_features=300, ngram_range=ng_r)
+                    try:
+                        mat_tf = vec.fit_transform(non_empty_docs)
+                        scores_tf = np.asarray(mat_tf.mean(axis=0)).ravel()
+                        terms_tf = vec.get_feature_names_out()
+                        kw_df = (
+                            pd.DataFrame({"Keyword / Phrase": terms_tf, "TFIDF_Score": np.round(scores_tf, 4)})
+                            .sort_values("TFIDF_Score", ascending=False)
+                            .head(top_kw_n)
+                        )
+                        st.session_state.nlp_kw_df = kw_df
+                    except ValueError:
+                        st.session_state.nlp_kw_df = None
+            log_ds_action(f"NLP Sentiment & TF-IDF analyzed on '{txt_col_sel}'")
+
+        if st.session_state.nlp_sent_df is not None:
+            sdf = st.session_state.nlp_sent_df
+            sc_vc = sdf["Sentiment"].value_counts()
+            sm1, sm2, sm3, sm4 = st.columns(4)
+            sm1.metric("Positive", int(sc_vc.get("Positive", 0)))
+            sm2.metric("Neutral", int(sc_vc.get("Neutral", 0)))
+            sm3.metric("Negative", int(sc_vc.get("Negative", 0)))
+            sm4.metric("Avg Word Count", f"{sdf['Word_Count'].mean():.1f}")
+
+            nl_l, nl_r = st.columns([1.2, 1.0])
+            with nl_l:
+                st.dataframe(sdf.head(50), use_container_width=True)
+            with nl_r:
+                if st.session_state.nlp_kw_df is not None and not st.session_state.nlp_kw_df.empty:
+                    st.markdown("**Top TF-IDF Keywords**")
+                    st.dataframe(st.session_state.nlp_kw_df, use_container_width=True)
+    else:
+        st.info(T("NLP के लिए डेटासेट में कम से कम 1 Text/Category कॉलम होना चाहिए।", "At least 1 text/category column is required for NLP."))
+
+    st.divider()
+
+    # --- NLP MODULE 2: TEXT CLASSIFICATION (TF-IDF + CLASSICAL ML) ---
+    st.subheader(T("2. 🏷️ Text Classification Model (TF-IDF + Logistic / Naive Bayes / Linear SVM)", "2. 🏷️ Text Classification Model (TF-IDF + Logistic / Naive Bayes / Linear SVM)"))
+    if HAS_SKLEARN and len(nlp_cats) >= 2:
+        with st.expander(T("📚 Text से Category Predict करने का मॉडल ट्रेन करें", "📚 Train a Model to Predict Category from Text"), expanded=False):
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.naive_bayes import MultinomialNB
+
+            tc1, tc2, tc3 = st.columns(3)
+            tc_text_col = tc1.selectbox(T("Input Text कॉलम:", "Input Text Column:"), nlp_cats, index=0, key="nlp_tc_x")
+            tc_tgt_opts = [c for c in nlp_cats if c != tc_text_col]
+            tc_target_col = tc2.selectbox(T("Target Category कॉलम:", "Target Category Column:"), tc_tgt_opts, key="nlp_tc_y")
+            tc_model_name = tc3.selectbox("NLP Classifier:", ["Logistic Regression", "Multinomial Naive Bayes"], key="nlp_tc_mdl")
+
+            if st.button(T("🚀 Text Classifier ट्रेन करें", "🚀 Train Text Classifier"), key="nlp_tc_train_btn"):
+                sub_tc = pd.DataFrame({
+                    "txt": get_1d_series(active_df, tc_text_col).fillna("").astype(str).str.strip(),
+                    "lbl": get_1d_series(active_df, tc_target_col).fillna("").astype(str).str.strip(),
+                })
+                sub_tc = sub_tc[(sub_tc["txt"] != "") & (sub_tc["lbl"] != "")]
+                vc_tc = sub_tc["lbl"].value_counts()
+                sub_tc = sub_tc[sub_tc["lbl"].isin(vc_tc[vc_tc >= 2].index)]
+                if len(sub_tc) < 8 or sub_tc["lbl"].nunique() < 2:
+                    st.error(T("कम से कम 2 Categories (प्रत्येक में ≥2 पंक्तियाँ) चाहिए।", "At least 2 categories (≥2 rows each) are required."))
+                else:
+                    X_tr_t, X_te_t, y_tr_t, y_te_t = train_test_split(sub_tc["txt"], sub_tc["lbl"], test_size=0.25, random_state=42)
+                    clf_obj = LogisticRegression(max_iter=500) if tc_model_name == "Logistic Regression" else MultinomialNB()
+                    txt_pipe = Pipeline([
+                        ("tfidf", TfidfVectorizer(stop_words="english", max_features=1500, ngram_range=(1, 2))),
+                        ("clf", clf_obj),
+                    ])
+                    txt_pipe.fit(X_tr_t, y_tr_t)
+                    acc_tc = accuracy_score(y_te_t, txt_pipe.predict(X_te_t))
+                    st.session_state.nlp_clf_bundle = {
+                        "pipe": txt_pipe,
+                        "acc": round(float(acc_tc) * 100, 2),
+                        "x_col": tc_text_col,
+                        "y_col": tc_target_col,
+                        "mdl": tc_model_name,
+                    }
+                    log_ds_action(f"NLP Text Classifier ({tc_model_name}) trained -> Acc: {acc_tc*100:.1f}%")
+
+            if st.session_state.nlp_clf_bundle is not None:
+                tb = st.session_state.nlp_clf_bundle
+                st.success(f"{tb['mdl']} — Validation Accuracy: **{tb['acc']}%** (`{tb['x_col']}` → `{tb['y_col']}`)")
+                sample_sentence = st.text_input(T("नया वाक्य लिखकर टेस्ट करें:", "Enter a new sentence to classify:"), key="nlp_live_txt_in")
+                if st.button(T("🔮 Text Classify करें", "🔮 Classify Text"), key="nlp_live_txt_btn") and sample_sentence.strip():
+                    pred_lbl = tb["pipe"].predict([sample_sentence.strip()])[0]
+                    st.metric(f"Predicted {tb['y_col']}", str(pred_lbl))
+
+    st.divider()
+
+    # --- MODULE 3: STATISTICAL TIME-SERIES & TREND FORECASTING ---
+    st.subheader(T("3. 📅 Time-Series & Moving-Average Trend Forecasting", "3. 📅 Time-Series & Moving-Average Trend Forecasting"))
+    if nlp_nums:
+        with st.expander(T("📈 Date / Index के आधार पर Future Trend Forecast निकालें", "📈 Generate Future Trend Forecast by Date / Index"), expanded=True):
+            ts1, ts2, ts3, ts4 = st.columns([1.2, 1.2, 1.0, 1.0])
+            ts_date_col = ts1.selectbox(T("Date / Order कॉलम (Optional):", "Date / Order Column (Optional):"), ["Row Order (Index)"] + nlp_all, key="ts_date_col")
+            ts_val_col = ts2.selectbox(T("Forecast Numeric कॉलम:", "Forecast Numeric Column:"), nlp_nums, key="ts_val_col")
+            ts_ma_win = ts3.slider(T("Moving Average Window:", "Moving Average Window:"), 2, 20, 4, key="ts_ma_win")
+            ts_horizon = ts4.slider(T("Future Steps:", "Future Steps:"), 3, 30, 8, key="ts_horizon")
+
+            if st.button(T("📊 Trend Forecast चलाएं", "📊 Run Trend Forecast"), key="ts_run_btn"):
+                y_series = pd.to_numeric(get_1d_series(active_df, ts_val_col), errors="coerce")
+                work_ts = pd.DataFrame({"val": y_series})
+                if ts_date_col != "Row Order (Index)":
+                    work_ts["dt"] = pd.to_datetime(get_1d_series(active_df, ts_date_col), errors="coerce")
+                    if work_ts["dt"].notna().sum() >= 5:
+                        work_ts = work_ts.dropna(subset=["dt", "val"]).groupby("dt", as_index=False)["val"].sum().sort_values("dt")
+                    else:
+                        work_ts = work_ts.dropna(subset=["val"]).reset_index(drop=True)
+                else:
+                    work_ts = work_ts.dropna(subset=["val"]).reset_index(drop=True)
+
+                if len(work_ts) < 5:
+                    st.error(T("Forecasting के लिए कम से कम 5 वैध मान चाहिए।", "At least 5 valid values are required for forecasting."))
+                else:
+                    vals = work_ts["val"].to_numpy(dtype=float)
+                    ma_vals = pd.Series(vals).rolling(window=min(ts_ma_win, len(vals)), min_periods=1).mean().to_numpy()
+                    x_idx = np.arange(len(vals), dtype=float)
+                    slope, intercept = np.polyfit(x_idx, vals, 1)
+                    fut_x = np.arange(len(vals), len(vals) + ts_horizon, dtype=float)
+                    fut_trend = intercept + slope * fut_x
+                    st.session_state.ts_fc_df = {
+                        "col": ts_val_col,
+                        "vals": vals[-min(80, len(vals)) :],
+                        "ma": ma_vals[-min(80, len(ma_vals)) :],
+                        "fut": fut_trend,
+                        "slope": round(float(slope), 4),
+                    }
+                    log_ds_action(f"Time-Series Trend Forecast run on '{ts_val_col}' ({ts_horizon} steps)")
+
+            if st.session_state.ts_fc_df is not None:
+                tfd = st.session_state.ts_fc_df
+                st.caption(f"Trend Slope per Step: `{tfd['slope']:+.4f}`")
+                fig_ts, ax_ts = plt.subplots(figsize=(7.0, 3.6), dpi=120)
+                hv = tfd["vals"]
+                mv = tfd["ma"]
+                fv = tfd["fut"]
+                ax_ts.plot(range(len(hv)), hv, label="Actual", color="#2563EB", alpha=0.75)
+                ax_ts.plot(range(len(mv)), mv, label="Moving Average", color="#059669", linewidth=2.0)
+                ax_ts.plot(range(len(hv), len(hv) + len(fv)), fv, label="Linear Trend Forecast", color="#D97706", linestyle="--", marker="o")
+                ax_ts.set_title(f"Time-Series Moving Average & Trend Forecast — {tfd['col']}", fontsize=10.5, fontweight="bold")
+                ax_ts.legend()
+                ax_ts.grid(True, linestyle="--", alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig_ts, use_container_width=True)
+                plt.close(fig_ts)
+                st.dataframe(
+                    pd.DataFrame({"Future_Step": range(1, len(fv) + 1), f"Forecast_{tfd['col']}": np.round(fv, 2)}),
+                    use_container_width=True,
+                )
+
+    st.divider()
+    if st.button(T("🤖 NLP & Forecasting AI Report जनरेट करें", "🤖 Generate NLP & Forecasting AI Report"), key="nlp_ai_rep_btn"):
+        nlp_ctx = [f"Dataset: {active_df.shape[0]} rows × {active_df.shape[1]} columns"]
+        if st.session_state.nlp_sent_df is not None:
+            vc_s = st.session_state.nlp_sent_df["Sentiment"].value_counts().to_dict()
+            nlp_ctx.append(f"Sentiment Distribution: {vc_s}")
+        if st.session_state.nlp_kw_df is not None and not st.session_state.nlp_kw_df.empty:
+            nlp_ctx.append("Top Keywords: " + ", ".join(st.session_state.nlp_kw_df["Keyword / Phrase"].head(8).tolist()))
+        if st.session_state.ts_fc_df is not None:
+            nlp_ctx.append(f"Time-Series Forecast on '{st.session_state.ts_fc_df['col']}': slope={st.session_state.ts_fc_df['slope']}, next={np.round(st.session_state.ts_fc_df['fut'][:5], 2).tolist()}")
+
+        nlp_summary_txt = "\n".join(nlp_ctx)
+        if is_en():
+            p_nlp = (
+                "You are I'm AI Buddy — a senior NLP & Forecasting Specialist. Based on these results, write a clear report in English with:\n"
+                "1. **NLP & Trend Findings**\n"
+                "2. **What Matters Most for Me & What I Should Do Next (Practical Action Plan)** — highlight the most useful takeaway and exact next step.\n\n"
+                + nlp_summary_txt
+            )
+        else:
+            p_nlp = (
+                "तुम I'm AI Buddy — एक सीनियर NLP और Forecasting विशेषज्ञ हो। नीचे दिए गए रिज़ल्ट के आधार पर सरल हिंदी में रिपोर्ट लिखो:\n"
+                "1. **NLP और Trend के मुख्य निष्कर्ष**\n"
+                "2. **इस रिज़ल्ट से मेरे लिए क्या ज़रूरी है और मुझे आगे क्या करना चाहिए (Next Steps & Useful Takeaways)** — साफ-साफ बताओ कि मेरे काम की सबसे ज़रूरी बात क्या है और अगला कदम क्या होना चाहिए।\n\n"
+                + nlp_summary_txt
+            )
+        with st.spinner(T(f"{selected_provider} से NLP रिपोर्ट बन रही है...", f"Generating NLP report via {selected_provider}...")):
+            n_ans, n_err = call_ai_provider(ai_config, p_nlp)
+        st.session_state.nlp_ai_report = n_ans if n_ans else f"### NLP & Forecasting Summary\n{nlp_summary_txt}\n\n*(AI Note: {n_err})*"
+
+    if st.session_state.nlp_ai_report:
+        st.markdown(st.session_state.nlp_ai_report)
+        st.download_button(
+            T("📥 NLP & Forecasting Report डाउनलोड करें (.md)", "📥 Download NLP & Forecasting Report (.md)"),
+            data=st.session_state.nlp_ai_report.encode("utf-8"),
+            file_name="im_ai_buddy_nlp_forecast_report.md",
+            mime="text/markdown",
+            key="nlp_dl_report_btn",
+        )
+
+# ------------------------------------------------------------------------------
+# MASTER COMBINED AI REPORT DOWNLOAD (ALL TABS IN ONE FILE)
+# ------------------------------------------------------------------------------
+st.divider()
+master_parts = ["# I'm AI Buddy — Complete Master AI Report", f"- **Dataset:** `{st.session_state.uni_loaded_file}` ({active_df.shape[0]} rows × {active_df.shape[1]} columns)"]
+if st.session_state.da_ai_summary:
+    master_parts.extend(["", "## 1. Data Analysis AI Report", st.session_state.da_ai_summary])
+if st.session_state.bi_ai_review:
+    master_parts.extend(["", "## 2. Power BI AI Dashboard Report", st.session_state.bi_ai_review])
+if st.session_state.ds_full_ai_report:
+    master_parts.extend(["", "## 3. Data Science & Gen AI Report", st.session_state.ds_full_ai_report])
+if st.session_state.dl_ai_report:
+    master_parts.extend(["", "## 4. Deep Learning Lab Report", st.session_state.dl_ai_report])
+if st.session_state.nlp_ai_report:
+    master_parts.extend(["", "## 5. NLP & Forecasting Report", st.session_state.nlp_ai_report])
+
+if len(master_parts) > 2:
+    st.download_button(
+        T("📦 सभी AI Reports एक साथ डाउनलोड करें (Master Report .md)", "📦 Download All Generated AI Reports Together (Master Report .md)"),
+        data="\n".join(master_parts).encode("utf-8"),
+        file_name="im_ai_buddy_master_ai_report.md",
+        mime="text/markdown",
+        key="master_all_ai_reports_dl_btn",
+    )

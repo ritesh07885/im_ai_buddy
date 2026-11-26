@@ -7,3 +7,11 @@ pillow
 openpyxl
 scikit-learn
 duckdb
+streamlit
+pillow
+numpy
+pandas
+scikit-learn
+torch
+torchvision
+transformers

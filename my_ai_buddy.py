@@ -10,7 +10,7 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
 import streamlit as st
 
 try:
@@ -189,6 +189,10 @@ defaults_state = {
     "uni_df": None,
     "uni_uploaded_img": None,
     "uni_img_name": None,
+    "img_proc_mode": "Original (Auto-Inspected)",
+    "img_resize_w": 800,
+    "img_bright": 1.0,
+    "img_contrast": 1.0,
     "ds_action_log": [],
     "da_ai_summary": None,
     "sql_query_box_val": "SELECT * FROM dataset LIMIT 20;",
@@ -223,7 +227,7 @@ for _k, _v in defaults_state.items():
 
 
 # ==============================================================================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS (INCLUDING AUTOMATIC IMAGE PROCESSING PIPELINE)
 # ==============================================================================
 def log_ds_action(msg):
     st.session_state.ds_action_log.append(msg)
@@ -244,6 +248,153 @@ def load_uploaded_table(file_obj):
 def load_uploaded_image(file_obj):
     img = Image.open(BytesIO(file_obj.getvalue()))
     return img.convert("RGB")
+
+
+def inspect_image_metrics(pil_img):
+    rgb_img = pil_img.convert("RGB")
+    arr = np.asarray(rgb_img, dtype=np.float32)
+    w, h = rgb_img.size
+    means = arr.mean(axis=(0, 1))
+    brightness = float(np.mean(means))
+    contrast = float(np.std(arr))
+    ch_names = ["Red", "Green", "Blue"]
+    dom_ch = ch_names[int(np.argmax(means))]
+    total_px = w * h
+    if total_px >= 1_000_000:
+        tier = "High Resolution (1MP+)"
+    elif total_px >= 250_000:
+        tier = "Medium Resolution"
+    else:
+        tier = "Low Resolution"
+    return {
+        "width": w,
+        "height": h,
+        "brightness": round(brightness, 2),
+        "contrast": round(contrast, 2),
+        "dominant_channel": dom_ch,
+        "resolution_tier": tier,
+        "rgb_means": [round(float(x), 1) for x in means],
+    }
+
+
+def process_uploaded_image(pil_img, mode="Original (Auto-Inspected)", resize_w=800, bright_f=1.0, contrast_f=1.0):
+    work = pil_img.convert("RGB").copy()
+    if mode == "Resize (Keep Aspect Ratio)":
+        ow, oh = work.size
+        if ow > 0:
+            nh = max(1, int(oh * (resize_w / float(ow))))
+            work = work.resize((int(resize_w), nh), Image.Resampling.LANCZOS)
+    elif mode == "Grayscale":
+        work = ImageOps.grayscale(work).convert("RGB")
+    elif mode == "Sharpen":
+        work = work.filter(ImageFilter.SHARPEN)
+    elif mode == "Edge Enhance":
+        work = work.filter(ImageFilter.EDGE_ENHANCE_MORE)
+    elif mode == "Smooth / Blur":
+        work = work.filter(ImageFilter.SMOOTH_MORE)
+    elif mode == "Auto Contrast":
+        work = ImageOps.autocontrast(work)
+    elif mode == "Flip Horizontal":
+        work = ImageOps.mirror(work)
+
+    if abs(bright_f - 1.0) > 0.01:
+        work = ImageEnhance.Brightness(work).enhance(bright_f)
+    if abs(contrast_f - 1.0) > 0.01:
+        work = ImageEnhance.Contrast(work).enhance(contrast_f)
+    return work
+
+
+def render_auto_image_pipeline_ui(pil_orig, img_filename, key_prefix="auto_img"):
+    metrics = inspect_image_metrics(pil_orig)
+    st.success(
+        T(
+            f"🖼️ इमेज अपलोड और ऑटो-प्रोसेस हो गई है: **{img_filename}** ({metrics['width']} × {metrics['height']} px • {metrics['resolution_tier']})",
+            f"🖼️ Image uploaded & auto-processed: **{img_filename}** ({metrics['width']} × {metrics['height']} px • {metrics['resolution_tier']})",
+        )
+    )
+
+    p_c1, p_c2, p_c3, p_c4 = st.columns([1.4, 1.0, 1.0, 1.0])
+    proc_modes = [
+        "Original (Auto-Inspected)",
+        "Resize (Keep Aspect Ratio)",
+        "Grayscale",
+        "Sharpen",
+        "Edge Enhance",
+        "Smooth / Blur",
+        "Auto Contrast",
+        "Flip Horizontal",
+    ]
+    sel_mode = p_c1.selectbox(
+        T("ऑटो-प्रोसेसिंग मोड:", "Auto-Processing Mode:"),
+        proc_modes,
+        index=proc_modes.index(st.session_state.img_proc_mode) if st.session_state.img_proc_mode in proc_modes else 0,
+        key=f"{key_prefix}_mode",
+    )
+    st.session_state.img_proc_mode = sel_mode
+
+    sel_rw = p_c2.slider(
+        T("Resize Width (px):", "Resize Width (px):"),
+        128,
+        1920,
+        int(st.session_state.img_resize_w),
+        32,
+        key=f"{key_prefix}_rw",
+    )
+    st.session_state.img_resize_w = sel_rw
+
+    sel_br = p_c3.slider(
+        T("Brightness:", "Brightness:"),
+        0.5,
+        1.7,
+        float(st.session_state.img_bright),
+        0.05,
+        key=f"{key_prefix}_br",
+    )
+    st.session_state.img_bright = sel_br
+
+    sel_ct = p_c4.slider(
+        T("Contrast:", "Contrast:"),
+        0.5,
+        1.7,
+        float(st.session_state.img_contrast),
+        0.05,
+        key=f"{key_prefix}_ct",
+    )
+    st.session_state.img_contrast = sel_ct
+
+    processed_img = process_uploaded_image(
+        pil_orig,
+        mode=sel_mode,
+        resize_w=sel_rw,
+        bright_f=sel_br,
+        contrast_f=sel_ct,
+    )
+    proc_metrics = inspect_image_metrics(processed_img)
+
+    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+    m_col1.metric(T("प्रोसेस्ड आकार", "Processed Size"), f"{proc_metrics['width']}×{proc_metrics['height']}")
+    m_col2.metric(T("Dominant Channel", "Dominant Channel"), proc_metrics["dominant_channel"])
+    m_col3.metric(T("Brightness", "Brightness"), proc_metrics["brightness"])
+    m_col4.metric(T("Contrast", "Contrast"), proc_metrics["contrast"])
+
+    v_left, v_right = st.columns(2)
+    with v_left:
+        st.caption(T("मूल इमेज (Original)", "Original Image"))
+        st.image(pil_orig, use_container_width=True)
+    with v_right:
+        st.caption(T(f"प्रोसेस्ड इमेज ({sel_mode})", f"Processed Image ({sel_mode})"))
+        st.image(processed_img, use_container_width=True)
+
+    buf_dl = BytesIO()
+    processed_img.save(buf_dl, format="PNG")
+    st.download_button(
+        T("📥 प्रोसेस्ड इमेज डाउनलोड करें (.png)", "📥 Download Processed Image (.png)"),
+        data=buf_dl.getvalue(),
+        file_name=f"processed_{img_filename.rsplit('.', 1)[0]}.png",
+        mime="image/png",
+        key=f"{key_prefix}_dl_btn",
+    )
+    return processed_img
 
 
 def set_sql_editor_query(q_text):
@@ -1281,8 +1432,8 @@ if st.sidebar.button(T("🔄 मूल डेटा पर रीसेट क�
 st.title("🤖 I'm AI Buddy")
 st.caption(
     T(
-        f"सक्रिय AI इंजन: **{selected_provider}** — Complete Data Science Studio, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI।",
-        f"Active AI Engine: **{selected_provider}** — Complete Data Science Studio, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI.",
+        f"सक्रिय AI इंजन: **{selected_provider}** — Complete Data Science Studio, Auto Image Processing, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI।",
+        f"Active AI Engine: **{selected_provider}** — Complete Data Science Studio, Auto Image Processing, Data Cleaning, Feature Engineering, SQL Studio, Power BI AI & ML/Gen AI.",
     )
 )
 
@@ -1290,8 +1441,8 @@ top_u1, top_u2 = st.columns([3, 1])
 with top_u1:
     uploaded_file = st.file_uploader(
         T(
-            "अपनी CSV, Excel (.xlsx) या Image (.jpg, .jpeg, .png) फ़ाइल अपलोड करें",
-            "Upload your CSV, Excel (.xlsx), or Image (.jpg, .jpeg, .png) file",
+            "अपनी CSV, Excel (.xlsx) या Image (.jpg, .jpeg, .png) फ़ाइल अपलोड करें (Image अपलोड करते ही ऑटो-प्रोसेस होगी)",
+            "Upload your CSV, Excel (.xlsx), or Image (.jpg, .jpeg, .png) file (Images auto-process on upload)",
         ),
         type=["csv", "xlsx", "jpg", "jpeg", "png"],
         key="uni_file_uploader",
@@ -1302,9 +1453,16 @@ if uploaded_file is not None:
     if ext_f in ("jpg", "jpeg", "png"):
         if st.session_state.uni_img_name != uploaded_file.name:
             st.session_state.uni_img_name = uploaded_file.name
-            st.session_state.uni_uploaded_img = load_uploaded_image(uploaded_file)
-            st.session_state.bi_bg_img = st.session_state.uni_uploaded_img.convert("RGBA")
-            st.session_state.bi_bg_src = f"Uploaded Image ({uploaded_file.name})"
+            loaded_img = load_uploaded_image(uploaded_file)
+            st.session_state.uni_uploaded_img = loaded_img
+            st.session_state.bi_bg_img = process_uploaded_image(
+                loaded_img,
+                mode=st.session_state.img_proc_mode,
+                resize_w=st.session_state.img_resize_w,
+                bright_f=st.session_state.img_bright,
+                contrast_f=st.session_state.img_contrast,
+            ).convert("RGBA")
+            st.session_state.bi_bg_src = f"Auto-Processed Image ({uploaded_file.name})"
     else:
         if st.session_state.uni_loaded_file != uploaded_file.name:
             st.session_state.uni_loaded_file = uploaded_file.name
@@ -1335,21 +1493,8 @@ else:
 
 if st.session_state.uni_uploaded_img is not None and (st.session_state.uni_df is None or st.session_state.uni_df.empty):
     img_now = st.session_state.uni_uploaded_img
-    st.success(
-        T(
-            f"🖼️ इमेज लोड हो गई है: **{st.session_state.uni_img_name}** ({img_now.size[0]} × {img_now.size[1]} px)",
-            f"🖼️ Image loaded: **{st.session_state.uni_img_name}** ({img_now.size[0]} × {img_now.size[1]} px)",
-        )
-    )
-    st.image(img_now, caption=st.session_state.uni_img_name, use_container_width=True)
-    buf_dl = BytesIO()
-    img_now.save(buf_dl, format="PNG")
-    st.download_button(
-        T("📥 इमेज डाउनलोड करें (.png)", "📥 Download Image (.png)"),
-        data=buf_dl.getvalue(),
-        file_name="im_ai_buddy_image.png",
-        mime="image/png",
-    )
+    proc_now = render_auto_image_pipeline_ui(img_now, st.session_state.uni_img_name or "image.png", key_prefix="solo_img")
+    st.session_state.bi_bg_img = proc_now.convert("RGBA")
     st.info(
         T(
             "💡 Tabular Data Analysis, SQL, ML और Forecasting चलाने के लिए ऊपर CSV या Excel फ़ाइल भी अपलोड करें।",
@@ -1374,11 +1519,19 @@ with top_u2:
     )
 
 if st.session_state.uni_uploaded_img is not None:
-    with st.expander(T(f"🖼️ अपलोड की गई इमेज: {st.session_state.uni_img_name}", f"🖼️ Uploaded Image: {st.session_state.uni_img_name}"), expanded=False):
-        st.image(st.session_state.uni_uploaded_img, use_container_width=True)
+    with st.expander(
+        T(f"🖼️ ऑटो-प्रोसेस्ड इमेज: {st.session_state.uni_img_name}", f"🖼️ Auto-Processed Image: {st.session_state.uni_img_name}"),
+        expanded=True,
+    ):
+        proc_with_df = render_auto_image_pipeline_ui(
+            st.session_state.uni_uploaded_img,
+            st.session_state.uni_img_name or "image.png",
+            key_prefix="with_df_img",
+        )
+        st.session_state.bi_bg_img = proc_with_df.convert("RGBA")
 
 # ==============================================================================
-# TOP NAVIGATION TABS
+# TOP NAVIGATION TABS (6 TABS: 1 TO 6)
 # ==============================================================================
 tab_da, tab_sql, tab_pbi, tab_ds, tab_dl, tab_nlp = st.tabs([
     "📊 Data Analysis",
@@ -3291,4 +3444,4 @@ if len(master_parts) > 2:
         file_name="im_ai_buddy_master_ai_report.md",
         mime="text/markdown",
         key="master_all_ai_reports_dl_btn",
-)
+                              )

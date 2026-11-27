@@ -98,9 +98,9 @@ def is_en():
 
 
 # ==============================================================================
-# PIN / PASSWORD LOCK SCREEN (RUNS BEFORE MAIN INTERFACE)
+# PIN / PASSWORD LOCK SCREEN
 # ==============================================================================
-APP_ACCESS_PIN = "1234"  # <-- Yahan apna pasandida PIN ya Password set karein
+APP_ACCESS_PIN = "1234"
 
 if "app_unlocked" not in st.session_state:
     st.session_state.app_unlocked = False
@@ -109,8 +109,7 @@ if "app_pin_error" not in st.session_state:
 
 
 def _verify_app_pin():
-    entered_pin = st.session_state.get("app_pin_input", "")
-    if entered_pin == APP_ACCESS_PIN:
+    if st.session_state.get("app_pin_input", "") == APP_ACCESS_PIN:
         st.session_state.app_unlocked = True
         st.session_state.app_pin_error = False
     else:
@@ -167,7 +166,7 @@ if not st.session_state.app_unlocked:
 
 
 # ==============================================================================
-# DATA SCIENCE FUNCTION & ALGORITHM CATALOG (LIST / BOX REFERENCE)
+# DATA SCIENCE FUNCTION & ALGORITHM CATALOG
 # ==============================================================================
 DS_FUNCTION_CATALOG = {
     "1. Data Cleaning & Preprocessing": [
@@ -296,26 +295,27 @@ for _k, _v in defaults_state.items():
 
 
 # ==============================================================================
-# HELPER FUNCTIONS (INCLUDING AUTOMATIC IMAGE PROCESSING PIPELINE)
+# CACHED LOADERS & HELPER FUNCTIONS
 # ==============================================================================
 def log_ds_action(msg):
     st.session_state.ds_action_log.append(msg)
 
 
-def load_uploaded_table(file_obj):
-    if file_obj.name.lower().endswith(".xlsx"):
-        return pd.read_excel(file_obj)
-    raw_bytes = file_obj.getvalue()
+@st.cache_data(show_spinner=False)
+def parse_table_from_bytes(raw_bytes: bytes, filename: str) -> pd.DataFrame:
+    if filename.lower().endswith(".xlsx"):
+        return pd.read_excel(BytesIO(raw_bytes))
     for enc in ("utf-8", "utf-8-sig", "cp1252", "latin1"):
         try:
-            return pd.read_csv(BytesIO(raw_bytes), encoding=enc)
+            return pd.read_csv(BytesIO(raw_bytes), encoding=enc, low_memory=False)
         except UnicodeDecodeError:
             continue
-    return pd.read_csv(BytesIO(raw_bytes), encoding="latin1", errors="replace")
+    return pd.read_csv(BytesIO(raw_bytes), encoding="latin1", errors="replace", low_memory=False)
 
 
-def load_uploaded_image(file_obj):
-    img = Image.open(BytesIO(file_obj.getvalue()))
+@st.cache_data(show_spinner=False)
+def parse_image_from_bytes(raw_bytes: bytes) -> Image.Image:
+    img = Image.open(BytesIO(raw_bytes))
     return img.convert("RGB")
 
 
@@ -1524,34 +1524,50 @@ with top_u1:
 
 if uploaded_file is not None:
     ext_f = uploaded_file.name.rsplit(".", 1)[-1].lower() if "." in uploaded_file.name else ""
-    if ext_f in ("jpg", "jpeg", "png"):
-        if st.session_state.uni_img_name != uploaded_file.name:
-            st.session_state.uni_img_name = uploaded_file.name
-            loaded_img = load_uploaded_image(uploaded_file)
-            st.session_state.uni_uploaded_img = loaded_img
-            st.session_state.bi_bg_img = process_uploaded_image(
-                loaded_img,
-                mode=st.session_state.img_proc_mode,
-                resize_w=st.session_state.img_resize_w,
-                bright_f=st.session_state.img_bright,
-                contrast_f=st.session_state.img_contrast,
-            ).convert("RGBA")
-            st.session_state.bi_bg_src = f"Auto-Processed Image ({uploaded_file.name})"
-    else:
-        if st.session_state.uni_loaded_file != uploaded_file.name:
-            st.session_state.uni_loaded_file = uploaded_file.name
-            loaded = load_uploaded_table(uploaded_file)
-            st.session_state.uni_raw_df = loaded.copy()
-            st.session_state.uni_df = loaded.copy()
-            st.session_state.da_ai_summary = None
-            st.session_state.sql_res_df = None
-            st.session_state.bi_ai_review = None
-            st.session_state.ds_ml_report = None
-            st.session_state.ds_full_ai_report = None
-            st.session_state.ds_trained_bundle = None
-            st.session_state.ds_cluster_res = None
-            st.session_state.ds_feat_rank_df = None
-            st.session_state.ds_action_log = []
+    try:
+        raw_file_bytes = uploaded_file.getvalue()
+        if not raw_file_bytes:
+            st.warning(
+                T(
+                    "⚠️ फ़ाइल खाली मिली या अभी अपलोड पूरी नहीं हुई है। कृपया थोड़ा इंतज़ार करें या दोबारा चुनें।",
+                    "⚠️ File is empty or upload has not finished yet. Please wait a moment or select again.",
+                )
+            )
+            st.stop()
+
+        if ext_f in ("jpg", "jpeg", "png"):
+            if st.session_state.uni_img_name != uploaded_file.name or st.session_state.uni_uploaded_img is None:
+                st.session_state.uni_img_name = uploaded_file.name
+                loaded_img = parse_image_from_bytes(raw_file_bytes)
+                st.session_state.uni_uploaded_img = loaded_img
+                st.session_state.bi_bg_img = process_uploaded_image(
+                    loaded_img,
+                    mode=st.session_state.img_proc_mode,
+                    resize_w=st.session_state.img_resize_w,
+                    bright_f=st.session_state.img_bright,
+                    contrast_f=st.session_state.img_contrast,
+                ).convert("RGBA")
+                st.session_state.bi_bg_src = f"Auto-Processed Image ({uploaded_file.name})"
+        else:
+            file_sig = f"{uploaded_file.name}:{len(raw_file_bytes)}"
+            if st.session_state.uni_loaded_file != file_sig or st.session_state.uni_df is None:
+                with st.spinner(T("फ़ाइल पढ़ी जा रही है...", "Reading uploaded file...")):
+                    loaded = parse_table_from_bytes(raw_file_bytes, uploaded_file.name)
+                st.session_state.uni_loaded_file = file_sig
+                st.session_state.uni_raw_df = loaded
+                st.session_state.uni_df = loaded.copy() if len(loaded) <= 50000 else loaded
+                st.session_state.da_ai_summary = None
+                st.session_state.sql_res_df = None
+                st.session_state.bi_ai_review = None
+                st.session_state.ds_ml_report = None
+                st.session_state.ds_full_ai_report = None
+                st.session_state.ds_trained_bundle = None
+                st.session_state.ds_cluster_res = None
+                st.session_state.ds_feat_rank_df = None
+                st.session_state.ds_action_log = []
+    except Exception as exc:
+        st.error(T(f"❌ फ़ाइल प्रोसेस करने में एरर आई: {exc}", f"❌ Error processing uploaded file: {exc}"))
+        st.stop()
 else:
     st.session_state.uni_loaded_file = None
     st.session_state.uni_raw_df = None
@@ -1962,12 +1978,8 @@ with tab_pbi:
     st.header(T("📈 Power BI AI डैशबोर्ड स्टूडियो (9 Charts + AI Background)", "📈 Power BI AI Dashboard Studio (9 Charts + AI Background)"))
 
     if st.session_state.bi_bg_img is None:
-        im, src = generate_ai_bg_image(
-            gemini_key,
-            "Minimalist soft pastel corporate geometric wave background, light cream and sky blue tones, no text",
-        )
-        st.session_state.bi_bg_img = im
-        st.session_state.bi_bg_src = src
+        st.session_state.bi_bg_img = build_local_soft_bg()
+        st.session_state.bi_bg_src = "Default Soft Background"
 
     p_cfg1, p_cfg2, p_cfg3, p_cfg4 = st.columns([1.2, 1.2, 1.2, 1.4])
     with p_cfg1:
@@ -1990,10 +2002,14 @@ with tab_pbi:
                 st.session_state.bi_bg_src = nsrc
             st.rerun()
 
-    with st.expander(T("✏️ Power BI डेटा सेल एडिट करें (Live Update)", "✏️ Edit Power BI Data Cells (Live Update)"), expanded=False):
-        edited_bi_grid = st.data_editor(active_df, num_rows="dynamic", use_container_width=True, key="bi_grid_edit")
+    with st.expander(T("✏️ Power BI डेटा सेल एडिट करें (Top 500 Rows Safe Mode)", "✏️ Edit Power BI Data Cells (Top 500 Rows Safe Mode)"), expanded=False):
+        edit_slice = active_df.head(500).copy()
+        edited_bi_grid = st.data_editor(edit_slice, num_rows="dynamic", use_container_width=True, key="bi_grid_edit")
         if st.button(T("💾 एडिट किया हुआ डेटा सेव करें", "💾 Save Edited Data"), key="bi_save_grid"):
-            st.session_state.uni_df = edited_bi_grid
+            if len(active_df) > 500:
+                st.session_state.uni_df = pd.concat([edited_bi_grid, active_df.iloc[500:]], ignore_index=True)
+            else:
+                st.session_state.uni_df = edited_bi_grid
             st.rerun()
 
     bi_nums = active_df.select_dtypes(include="number").columns.tolist()

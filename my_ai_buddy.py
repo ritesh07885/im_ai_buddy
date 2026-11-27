@@ -98,6 +98,75 @@ def is_en():
 
 
 # ==============================================================================
+# PIN / PASSWORD LOCK SCREEN (RUNS BEFORE MAIN INTERFACE)
+# ==============================================================================
+APP_ACCESS_PIN = "1234"  # <-- Yahan apna pasandida PIN ya Password set karein
+
+if "app_unlocked" not in st.session_state:
+    st.session_state.app_unlocked = False
+if "app_pin_error" not in st.session_state:
+    st.session_state.app_pin_error = False
+
+
+def _verify_app_pin():
+    entered_pin = st.session_state.get("app_pin_input", "")
+    if entered_pin == APP_ACCESS_PIN:
+        st.session_state.app_unlocked = True
+        st.session_state.app_pin_error = False
+    else:
+        st.session_state.app_pin_error = True
+
+
+if not st.session_state.app_unlocked:
+    _, lock_col, _ = st.columns([1.2, 1.4, 1.2])
+    with lock_col:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown("### 🔒 I'm AI Buddy — Access Locked")
+            st.caption(
+                T(
+                    "इंटरफ़ेस शुरू करने के लिए कृपया अपना PIN / Password दर्ज करें।",
+                    "Please enter your PIN / Password to unlock and start the interface.",
+                )
+            )
+            st.text_input(
+                T("PIN / Password डालें:", "Enter PIN / Password:"),
+                type="password",
+                key="app_pin_input",
+                on_change=_verify_app_pin,
+                placeholder="••••",
+            )
+            b_col1, b_col2 = st.columns([1.5, 1.0])
+            with b_col1:
+                st.button(
+                    T("🔓 Unlock Interface", "🔓 Unlock Interface"),
+                    type="primary",
+                    use_container_width=True,
+                    on_click=_verify_app_pin,
+                )
+            with b_col2:
+                lock_lang = st.selectbox(
+                    "Language",
+                    ["Hindi", "English"],
+                    index=0 if st.session_state.ui_lang == "Hindi" else 1,
+                    label_visibility="collapsed",
+                    key="lock_screen_lang",
+                )
+                if lock_lang != st.session_state.ui_lang:
+                    st.session_state.ui_lang = lock_lang
+                    st.rerun()
+
+            if st.session_state.app_pin_error:
+                st.error(
+                    T(
+                        "❌ गलत PIN / Password! कृपया सही PIN डालें।",
+                        "❌ Incorrect PIN / Password! Please try again.",
+                    )
+                )
+    st.stop()
+
+
+# ==============================================================================
 # DATA SCIENCE FUNCTION & ALGORITHM CATALOG (LIST / BOX REFERENCE)
 # ==============================================================================
 DS_FUNCTION_CATALOG = {
@@ -1295,8 +1364,13 @@ def run_sql_engine(engine_name, df_main, query_str):
 
 
 # ==============================================================================
-# SIDEBAR (ONE-TAP LANGUAGE SWITCH + MULTI-PLATFORM AI SETTINGS)
+# SIDEBAR (LOCK APP + ONE-TAP LANGUAGE SWITCH + MULTI-PLATFORM AI SETTINGS)
 # ==============================================================================
+if st.sidebar.button(T("🔒 App लॉक करें (Lock App)", "🔒 Lock App"), use_container_width=True):
+    st.session_state.app_unlocked = False
+    st.session_state.app_pin_error = False
+    st.rerun()
+
 st.sidebar.header(T("🌐 भाषा / Language (One-Tap)", "🌐 Language / भाषा (One-Tap)"))
 lang_choice = st.sidebar.radio(
     T("इंटरफ़ेस व AI आउटपुट की भाषा:", "Interface & AI Output Language:"),
@@ -3444,4 +3518,4 @@ if len(master_parts) > 2:
         file_name="im_ai_buddy_master_ai_report.md",
         mime="text/markdown",
         key="master_all_ai_reports_dl_btn",
-                              )
+    )
